@@ -1,0 +1,12 @@
+{
+  "name": "holmdale-staff-portal",
+  "version": "1.0.0",
+  "description": "Static file server for Holmdale Rodeo staff tools",
+  "main": "static-server.js",
+  "scripts": {
+    "start": "node static-server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

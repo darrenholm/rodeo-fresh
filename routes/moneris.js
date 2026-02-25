@@ -4,8 +4,8 @@ const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
 // Moneris API endpoints
-const MONERIS_PRELOAD_URL = 'https://gateway.moneris.com/chkt/request/request.php';
-const MONERIS_CHECKOUT_URL = 'https://gateway.moneris.com/chkt/index.php';
+const MONERIS_PRELOAD_URL = 'https://gateway.moneris.com/chktv2/request/request.php';
+const MONERIS_CHECKOUT_URL = 'https://gateway.moneris.com/chktv2/index.php';
 
 // Helper: get Moneris credentials from env
 function getMonerisCredentials() {

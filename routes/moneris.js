@@ -13,6 +13,15 @@ function getMonerisCredentials() {
   const apiToken = process.env.MONERIS_API_TOKEN;
   const checkoutId = process.env.MONERIS_CHECKOUT_ID;
 
+  console.log('Moneris credentials check:', {
+    storeId: storeId ? storeId.substring(0, 5) + '...' : 'MISSING',
+    apiToken: apiToken ? apiToken.substring(0, 5) + '...' : 'MISSING',
+    checkoutId: checkoutId ? checkoutId.substring(0, 5) + '...' : 'MISSING',
+    storeIdLength: storeId?.length,
+    apiTokenLength: apiToken?.length,
+    checkoutIdLength: checkoutId?.length
+  });
+
   if (!storeId || !apiToken || !checkoutId) {
     throw new Error('Moneris credentials not configured');
   }

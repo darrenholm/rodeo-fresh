@@ -73,10 +73,10 @@ router.post('/register',
 );
 
 /**
- * POST /api/auth/login
+ *  /api/auth/login
  * Login user
  */
-router.post('/login',
+router.('/login',
   [
     body('email').isEmail().normalizeEmail(),
     body('password').notEmpty()
@@ -154,6 +154,25 @@ router.post('/verify', async (req, res) => {
     }
 
     res.json({ valid: true, user: result.rows[0] });
+  } catch (error) {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+});
+/**
+ * GET /api/auth/verify
+ * Verify JWT token (used by staff portal)
+ */
+router.get('/verify', async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'holmdale_rodeo_secret_2026_change_in_production');
+    res.json({ valid: true, staff: decoded });
   } catch (error) {
     res.status(401).json({ error: 'Invalid token' });
   }

@@ -159,9 +159,10 @@ router.post('/ticket-confirmation', authenticateToken, async (req, res) => {
 
       // Decrement available tickets
       try {
+        const totalQty = (ticketOrder.quantity_adult || 0) + (ticketOrder.quantity_child || 0);
         await pool.query(
           'UPDATE events SET tickets_sold = COALESCE(tickets_sold, 0) + $1 WHERE id = $2',
-          [ticketOrder.quantity || 1, ticketOrder.event_id]
+          [totalQty || 1, ticketOrder.event_id]
         );
       } catch (e) {
         console.error('Failed to update tickets_sold:', e.message);

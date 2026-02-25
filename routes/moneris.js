@@ -97,13 +97,13 @@ router.post('/ticket-checkout', authenticateToken, async (req, res) => {
     // Create ticket order in database
     const orderResult = await pool.query(
       `INSERT INTO ticket_orders (
-        event_id, ticket_type, quantity, quantity_adult, quantity_child,
+        event_id, ticket_type, quantity_adult, quantity_child,
         bar_credits, customer_name, customer_email, customer_phone,
-        confirmation_code, status, total_price, created_date
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+        confirmation_code, status, total_price, created_date, updated_date
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
       RETURNING *`,
       [
-        eventId, 'mixed', totalQuantity, quantityAdult, quantityChild,
+        eventId, 'mixed', quantityAdult, quantityChild,
         barCredits || 0, customerName, customerEmail, customerPhone || '',
         confirmationCode, 'pending', total.toFixed(2)
       ]
@@ -340,14 +340,15 @@ router.post('/webhook', async (req, res) => {
 
       // Update tickets_sold count on event
       const orderResult = await pool.query(
-        'SELECT event_id, quantity FROM ticket_orders WHERE confirmation_code = $1',
+        'SELECT event_id, quantity_adult, quantity_child FROM ticket_orders WHERE confirmation_code = $1',
         [orderNo]
       );
       if (orderResult.rows.length > 0) {
-        const { event_id, quantity } = orderResult.rows[0];
+        const { event_id, quantity_adult, quantity_child } = orderResult.rows[0];
+        const totalQuantity = (quantity_adult || 0) + (quantity_child || 0);
         await pool.query(
           'UPDATE events SET tickets_sold = COALESCE(tickets_sold, 0) + $1 WHERE id = $2',
-          [quantity, event_id]
+          [totalQuantity, event_id]
         );
       }
 

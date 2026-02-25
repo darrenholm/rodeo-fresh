@@ -149,4 +149,62 @@ router.post('/:id/scan', authenticateToken, async (req, res) => {
   }
 });
 
+// PATCH update ticket order fields
+router.patch('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    
+    const setClauses = [];
+    const values = [];
+    let paramIndex = 1;
+    
+    for (const [key, value] of Object.entries(updates)) {
+      setClauses.push(`${key} = $${paramIndex}`);
+      values.push(value);
+      paramIndex++;
+    }
+    
+    setClauses.push(`updated_date = NOW()`);
+    values.push(id);
+    
+    const result = await pool.query(
+      `UPDATE ticket_orders SET ${setClauses.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+      values
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating ticket:', error);
+    res.status(500).json({ error: 'Failed to update ticket', details: error.message });
+  }
+});
+
+// POST verify 19+ for a wristband
+router.post('/:id/verify-age', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const result = await pool.query(
+      `UPDATE ticket_orders SET is_19_plus = true, updated_date = NOW() 
+       WHERE id = $1 OR rfid_tag_id = $1 RETURNING *`,
+      [id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+    
+    console.log(`✓ Age verified for ticket: ${result.rows[0].confirmation_code}`);
+    res.json({ success: true, ticket: result.rows[0] });
+  } catch (error) {
+    console.error('Error verifying age:', error);
+    res.status(500).json({ error: 'Failed to verify age', details: error.message });
+  }
+});
+
 module.exports = router;

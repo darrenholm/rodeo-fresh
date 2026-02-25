@@ -141,6 +141,19 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 
+// Run auto-migrations
+const pool = require('./config/database');
+(async () => {
+  try {
+    await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS is_19_plus BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS bar_credits INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'pending'`);
+    console.log('✓ Auto-migrations complete');
+  } catch (e) {
+    console.log('Migration note:', e.message);
+  }
+})();
+
 app.listen(PORT, () => {
   console.log('='.repeat(50));
   console.log(`🚀 Holmdale Rodeo API Server`);

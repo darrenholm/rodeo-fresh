@@ -111,5 +111,22 @@ router.post('/change-password', async (req, res) => {
     res.status(500).json({ error: 'Failed to change password' });
   }
 });
+// POST /api/auth/reset-staff-password (admin use)
+router.post('/reset-staff-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  try {
+    const result = await pool.query(
+      'UPDATE staff SET password_hash = NULL WHERE LOWER(email) = LOWER($1) RETURNING email, fullname',
+      [email.trim()]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Staff member not found' });
+    }
+    res.json({ success: true, message: 'Password reset to default (rodeo2026)', staff: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = router;

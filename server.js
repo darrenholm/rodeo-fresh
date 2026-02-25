@@ -150,6 +150,7 @@ const pool = require('./config/database');
     await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS is_19_plus BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS bar_credits INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'pending'`);
+await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS bar_redeemed INTEGER DEFAULT 0`);
     console.log('✓ Auto-migrations complete');
   } catch (e) {
     console.log('Migration note:', e.message);

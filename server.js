@@ -20,6 +20,7 @@ const monerisRoutes = require('./routes/moneris');
 const emailRoutes = require('./routes/email');
 const reportRoutes = require('./routes/reports');
 const app = express();
+const barCreditsRoutes = require('./routes/bar-credits');
 
 // ============================================
 // MIDDLEWARE
@@ -77,6 +78,7 @@ app.use('/api/shifts-crud', shiftsCrudRoutes);
 app.use('/api/moneris', monerisRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/bar-credits', barCreditsRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

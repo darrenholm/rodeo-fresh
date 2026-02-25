@@ -92,19 +92,21 @@ router.post('/ticket-checkout', authenticateToken, async (req, res) => {
     const quantityAdult = (tickets.general || 0) + ((tickets.family || 0) * 2);
     const quantityChild = (tickets.child || 0) + ((tickets.family || 0) * 2);
 
-    const confirmationCode = `CONF-${Date.now().toString().slice(-8)}`;
+    // Generate IDs matching existing format
+    const id = `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const confirmationCode = `WW-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
 
     // Create ticket order in database
     const orderResult = await pool.query(
       `INSERT INTO ticket_orders (
-        event_id, ticket_type, quantity_adult, quantity_child,
-        bar_credits, customer_name, customer_email, customer_phone,
-        confirmation_code, status, total_price, created_date, updated_date
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+        id, event_id, ticket_type, quantity_adult, quantity_child,
+        customer_name, customer_email, customer_phone,
+        confirmation_code, status, total_price, created_date, updated_date, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), 'web')
       RETURNING *`,
       [
-        eventId, 'mixed', quantityAdult, quantityChild,
-        barCredits || 0, customerName, customerEmail, customerPhone || '',
+        id, eventId, 'mixed', quantityAdult, quantityChild,
+        customerName, customerEmail, customerPhone || '',
         confirmationCode, 'pending', total.toFixed(2)
       ]
     );

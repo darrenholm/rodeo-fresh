@@ -1,7 +1,19 @@
 const jwt = require('jsonwebtoken');
 
+// ============================================================
+//  AUTH MIDDLEWARE — Multi-Role Support
+//  
+//  Roles: admin, manager, bartender, gate, food, merch
+//  Users can have multiple roles stored as JSONB array.
+//
+//  Usage in routes:
+//    router.get('/secret', authenticateToken, requireRole('admin'), handler);
+//    router.get('/bar', authenticateToken, requireRole('bartender'), handler);
+//    router.get('/reports', authenticateToken, requireRole('admin', 'manager'), handler);
+// ============================================================
+
 /**
- * Middleware to authenticate JWT token
+ * Verify JWT token and attach user to request
  */
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -21,27 +33,55 @@ const authenticateToken = (req, res, next) => {
 };
 
 /**
- * Middleware to check if user is admin
+ * Check if user has ANY of the specified roles.
+ * Admin always has access to everything.
+ * Manager has access to everything except admin-only routes.
+ * 
+ * Usage: requireRole('staff')              — any authenticated user
+ *        requireRole('manager')            — manager or admin
+ *        requireRole('admin')              — admin only
  */
-const requireAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
-  }
-  next();
+const requireRole = (...allowedRoles) => {
+  return (req, res, next) => {
+    const userRoles = req.user.roles || [req.user.role || 'staff'];
+
+    // Admin always has access
+    if (userRoles.includes('admin')) {
+      return next();
+    }
+
+    // Manager has access to manager + staff routes
+    if (userRoles.includes('manager') && (allowedRoles.includes('manager') || allowedRoles.includes('staff'))) {
+      return next();
+    }
+
+    // Check if user has any of the allowed roles
+    const hasAccess = allowedRoles.some(role => userRoles.includes(role));
+
+    if (!hasAccess) {
+      return res.status(403).json({ 
+        error: 'Access denied',
+        required: allowedRoles,
+        your_roles: userRoles
+      });
+    }
+
+    next();
+  };
 };
 
 /**
- * Middleware to check if user is staff or admin
+ * Backward-compatible shortcuts
  */
+const requireAdmin = requireRole('admin');
 const requireStaff = (req, res, next) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'staff') {
-    return res.status(403).json({ error: 'Staff access required' });
-  }
+  // Any authenticated user with any role counts as staff
   next();
 };
 
 module.exports = { 
   authenticateToken, 
+  requireRole,
   requireAdmin, 
   requireStaff 
 };

@@ -3,12 +3,17 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const pool = require('../config/database');
+const { authenticateToken, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 
+// ============================================================
+//  AUTH ROUTES — Updated with Multi-Role Support
+// ============================================================
+
 /**
  * POST /api/auth/register
- * Register a new user
+ * Register a new user (admin only in production)
  */
 router.post('/register',
   [
@@ -22,35 +27,27 @@ router.post('/register',
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { email, password, name, role = 'user' } = req.body;
+    const { email, password, name, role = 'user', roles } = req.body;
 
     try {
-      // Check if user exists
-      const userExists = await pool.query(
-        'SELECT id FROM users WHERE email = $1',
-        [email]
-      );
-
+      const userExists = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
       if (userExists.rows.length > 0) {
         return res.status(400).json({ error: 'User already exists' });
       }
 
-      // Hash password
       const hashedPassword = await bcrypt.hash(password, 10);
+      const userRoles = roles || [role === 'admin' ? 'admin' : 'gate'];
 
-      // Create user
       const result = await pool.query(
-        `INSERT INTO users (email, password, name, role, created_at, updated_at) 
-         VALUES ($1, $2, $3, $4, NOW(), NOW()) 
-         RETURNING id, email, name, role`,
-        [email, hashedPassword, name, role]
+        `INSERT INTO users (email, password, name, role, roles, created_at, updated_at) 
+         VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) 
+         RETURNING id, email, name, role, roles`,
+        [email, hashedPassword, name, role, JSON.stringify(userRoles)]
       );
 
       const user = result.rows[0];
-
-      // Generate JWT
       const token = jwt.sign(
-        { userId: user.id, email: user.email, role: user.role },
+        { userId: user.id, email: user.email, role: user.role, roles: user.roles },
         process.env.JWT_SECRET,
         { expiresIn: process.env.JWT_EXPIRES_IN }
       );
@@ -58,12 +55,7 @@ router.post('/register',
       res.status(201).json({
         message: 'User created successfully',
         token,
-        user: { 
-          id: user.id, 
-          email: user.email, 
-          name: user.name,
-          role: user.role 
-        }
+        user: { id: user.id, email: user.email, name: user.name, role: user.role, roles: user.roles }
       });
     } catch (error) {
       console.error('Registration error:', error);
@@ -73,10 +65,10 @@ router.post('/register',
 );
 
 /**
- *  /api/auth/login
- * Login user
+ * POST /api/auth/login
+ * Login — returns JWT with roles
  */
-router.('/login',
+router.post('/login',
   [
     body('email').isEmail().normalizeEmail(),
     body('password').notEmpty()
@@ -91,7 +83,7 @@ router.('/login',
 
     try {
       const result = await pool.query(
-        'SELECT id, email, password, name, role FROM users WHERE email = $1',
+        'SELECT id, email, password, name, role, roles FROM users WHERE email = $1',
         [email]
       );
 
@@ -106,8 +98,11 @@ router.('/login',
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
+      // Ensure roles array exists (backward compat)
+      const userRoles = user.roles || [user.role || 'user'];
+
       const token = jwt.sign(
-        { userId: user.id, email: user.email, role: user.role },
+        { userId: user.id, email: user.email, role: user.role, roles: userRoles },
         process.env.JWT_SECRET,
         { expiresIn: process.env.JWT_EXPIRES_IN }
       );
@@ -119,7 +114,8 @@ router.('/login',
           id: user.id, 
           email: user.email, 
           name: user.name,
-          role: user.role
+          role: user.role,
+          roles: userRoles
         }
       });
     } catch (error) {
@@ -131,7 +127,7 @@ router.('/login',
 
 /**
  * POST /api/auth/verify
- * Verify JWT token
+ * Verify JWT — returns user with roles
  */
 router.post('/verify', async (req, res) => {
   const authHeader = req.headers['authorization'];
@@ -143,9 +139,8 @@ router.post('/verify', async (req, res) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
     const result = await pool.query(
-      'SELECT id, email, name, role FROM users WHERE id = $1',
+      'SELECT id, email, name, role, roles FROM users WHERE id = $1',
       [decoded.userId]
     );
 
@@ -158,23 +153,126 @@ router.post('/verify', async (req, res) => {
     res.status(401).json({ error: 'Invalid token' });
   }
 });
+
+// ============================================================
+//  ROLE MANAGEMENT — Admin only
+// ============================================================
+
 /**
- * GET /api/auth/verify
- * Verify JWT token (used by staff portal)
+ * GET /api/auth/users
+ * List all users with roles (admin only)
  */
-router.get('/verify', async (req, res) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ error: 'No token provided' });
-  }
-
+router.get('/users', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'holmdale_rodeo_secret_2026_change_in_production');
-    res.json({ valid: true, staff: decoded });
+    const { rows } = await pool.query(
+      `SELECT id, email, name, role, roles, created_at FROM users ORDER BY name`
+    );
+    res.json(rows);
   } catch (error) {
-    res.status(401).json({ error: 'Invalid token' });
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+/**
+ * PUT /api/auth/users/:id/roles
+ * Update a user's roles (admin only)
+ */
+router.put('/users/:id/roles', authenticateToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { roles } = req.body;
+
+    const validRoles = ['admin', 'manager', 'staff'];
+    const filtered = (roles || []).filter(r => validRoles.includes(r));
+
+    if (filtered.length === 0) {
+      return res.status(400).json({ error: 'At least one valid role required. Valid: admin, manager, staff' });
+    }
+
+    const { rows } = await pool.query(
+      `UPDATE users SET roles = $1, updated_at = NOW() WHERE id = $2 RETURNING id, email, name, roles`,
+      [JSON.stringify(filtered), id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    console.log(`[auth] Roles updated for ${rows[0].email}: ${filtered.join(', ')}`);
+    res.json({ success: true, user: rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update roles' });
+  }
+});
+
+/**
+ * POST /api/auth/create-staff
+ * Create a new staff user with roles (admin only)
+ */
+router.post('/create-staff', authenticateToken, requireRole('admin'),
+  [
+    body('email').isEmail().normalizeEmail(),
+    body('password').isLength({ min: 6 }),
+    body('name').trim().notEmpty()
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { email, password, name, roles = ['staff'] } = req.body;
+
+    try {
+      const userExists = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+      if (userExists.rows.length > 0) {
+        return res.status(400).json({ error: 'User already exists' });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const primaryRole = roles.includes('admin') ? 'admin' : 'staff';
+
+      const result = await pool.query(
+        `INSERT INTO users (email, password, name, role, roles, created_at, updated_at) 
+         VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) 
+         RETURNING id, email, name, role, roles`,
+        [email, hashedPassword, name, primaryRole, JSON.stringify(roles)]
+      );
+
+      console.log(`[auth] Staff created: ${email} with roles: ${roles.join(', ')}`);
+
+      res.status(201).json({
+        success: true,
+        user: result.rows[0]
+      });
+    } catch (error) {
+      console.error('Create staff error:', error);
+      res.status(500).json({ error: 'Failed to create staff account' });
+    }
+  }
+);
+
+/**
+ * DELETE /api/auth/users/:id
+ * Delete a user (admin only, can't delete self)
+ */
+router.delete('/users/:id', authenticateToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (id === req.user.userId) {
+      return res.status(400).json({ error: 'Cannot delete your own account' });
+    }
+
+    const { rows } = await pool.query('DELETE FROM users WHERE id = $1 RETURNING email', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    console.log(`[auth] User deleted: ${rows[0].email}`);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete user' });
   }
 });
 

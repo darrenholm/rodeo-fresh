@@ -135,19 +135,20 @@ router.post('/:id/decrement-tickets', authenticateToken, async (req, res) => {
   }
 });
 // GET current tier for an event
-router.get('/:id/current-tier', async (req, res) => {
+// Supports both /:id/tier and /:id/current-tier
+async function getTierHandler(req, res) {
   try {
     const { id } = req.params;
     
-const result = await pool.query(
-  `SELECT 
-    tickets_sold,
-    tier1_adult_price, tier1_family_price, tier1_quantity, tier1_sold,
-    tier2_adult_price, tier2_family_price, tier2_quantity, tier2_sold,
-    tier3_adult_price, tier3_family_price, tier3_quantity, tier3_sold
-   FROM events WHERE id = $1`,
-  [id]
-);
+    const result = await pool.query(
+      `SELECT 
+        tickets_sold,
+        tier1_adult_price, tier1_family_price, tier1_quantity, tier1_sold,
+        tier2_adult_price, tier2_family_price, tier2_quantity, tier2_sold,
+        tier3_adult_price, tier3_family_price, tier3_quantity, tier3_sold
+       FROM events WHERE id = $1`,
+      [id]
+    );
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Event not found' });
@@ -170,36 +171,39 @@ const result = await pool.query(
       familyPrice = event.tier2_family_price;
     }
     
-   res.json({
-  currentTier,
-  adultPrice,
-  familyPrice,
-  childPrice: 10,  // Hardcoded
-  ticketsSold: event.tickets_sold,
-  tiers: {
-    tier1: {
-      adultPrice: event.tier1_adult_price,
-      familyPrice: event.tier1_family_price,
-      quantity: event.tier1_quantity,
-      sold: event.tier1_sold
-    },
-    tier2: {
-      adultPrice: event.tier2_adult_price,
-      familyPrice: event.tier2_family_price,
-      quantity: event.tier2_quantity,
-      sold: event.tier2_sold
-    },
-    tier3: {
-      adultPrice: event.tier3_adult_price,
-      familyPrice: event.tier3_family_price,
-      quantity: event.tier3_quantity,
-      sold: event.tier3_sold
-    }
-  }
-});
+    res.json({
+      currentTier,
+      adultPrice,
+      familyPrice,
+      childPrice: 10,
+      ticketsSold: event.tickets_sold,
+      tiers: {
+        tier1: {
+          adultPrice: event.tier1_adult_price,
+          familyPrice: event.tier1_family_price,
+          quantity: event.tier1_quantity,
+          sold: event.tier1_sold
+        },
+        tier2: {
+          adultPrice: event.tier2_adult_price,
+          familyPrice: event.tier2_family_price,
+          quantity: event.tier2_quantity,
+          sold: event.tier2_sold
+        },
+        tier3: {
+          adultPrice: event.tier3_adult_price,
+          familyPrice: event.tier3_family_price,
+          quantity: event.tier3_quantity,
+          sold: event.tier3_sold
+        }
+      }
+    });
   } catch (error) {
     console.error('Error getting tier:', error);
     res.status(500).json({ error: 'Failed to get tier' });
   }
-});
+}
+
+router.get('/:id/tier', getTierHandler);
+router.get('/:id/current-tier', getTierHandler);
 module.exports = router;

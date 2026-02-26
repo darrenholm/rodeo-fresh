@@ -83,7 +83,7 @@ router.post('/login',
 
     try {
       const result = await pool.query(
-        'SELECT id, email, password, name, role, roles FROM users WHERE email = $1',
+        'SELECT id, email, password, name, role, roles, must_change_password FROM users WHERE email = $1',
         [email]
       );
 
@@ -115,7 +115,8 @@ router.post('/login',
           email: user.email, 
           name: user.name,
           role: user.role,
-          roles: userRoles
+          roles: userRoles,
+          must_change_password: user.must_change_password || false
         }
       });
     } catch (error) {

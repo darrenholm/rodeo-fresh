@@ -55,7 +55,7 @@ async function monerisPreload(data) {
 // POST /api/moneris/ticket-checkout
 // Create Moneris checkout for ticket purchases
 // ============================================
-router.post('/ticket-checkout', authenticateToken, async (req, res) => {
+router.post('/ticket-checkout', async (req, res) => {
   try {
     const { tickets, barTickets, barCredits, eventId, customerEmail, customerName, customerPhone } = req.body;
 

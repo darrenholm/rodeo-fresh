@@ -113,10 +113,22 @@ router.post('/:id/decrement-tickets', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Not enough tickets available' });
     }
 
-    // Update event
+    // Determine which tier to increment
+    const tierResult = await pool.query(
+      'SELECT tickets_sold, tier1_quantity, tier2_quantity FROM events WHERE id = $1', [id]
+    );
+    const ev = tierResult.rows[0];
+    const totalQty = (quantity_adult || 0) + (quantity_child || 0) + ((quantity_family || 0) * 4);
+    let tierCol = 'tier1_sold';
+    if (ev.tickets_sold >= ev.tier1_quantity + ev.tier2_quantity) {
+      tierCol = 'tier3_sold';
+    } else if (ev.tickets_sold >= ev.tier1_quantity) {
+      tierCol = 'tier2_sold';
+    }
+    // Update event with availability, tickets_sold, and tier sold count
     const result = await pool.query(
-      'UPDATE events SET general_available = $1, child_available = $2, family_available = $3, updated_date = CURRENT_TIMESTAMP WHERE id = $4 RETURNING *',
-      [newGeneralAvailable, newChildAvailable, newFamilyAvailable, id]
+      `UPDATE events SET general_available = $1, child_available = $2, family_available = $3, tickets_sold = tickets_sold + $4, ${tierCol} = ${tierCol} + $4, updated_date = CURRENT_TIMESTAMP WHERE id = $5 RETURNING *`,
+      [newGeneralAvailable, newChildAvailable, newFamilyAvailable, totalQty, id]
     );
 
     console.log(`✓ Tickets decremented. New availability:`, {

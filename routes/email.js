@@ -1,198 +1,219 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
-const { authenticateToken } = require('../middleware/auth');
-const QRCode = require('qrcode');
 
-// Resend API helper
+// ============================================
+// EMAIL ROUTES — Ticket confirmations via Resend
+// ============================================
+
+const RESEND_API_URL = 'https://api.resend.com/emails';
+
 async function sendEmail({ to, subject, html }) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
-    throw new Error('RESEND_API_KEY not configured');
+    console.error('✗ RESEND_API_KEY not set');
+    throw new Error('Email service not configured');
   }
 
-  const response = await fetch('https://api.resend.com/emails', {
+  const from = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+
+  const response = await fetch(RESEND_API_URL, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      from: 'Holmdale Pro Rodeo <info@holmdalerodeo.ca>',
-      to,
-      subject,
-      html
-    })
+    body: JSON.stringify({ from, to: [to], subject, html })
   });
+
+  const data = await response.json();
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Email send failed: ${response.status} - ${errorText}`);
+    console.error('✗ Resend error:', data);
+    throw new Error(data.message || 'Email send failed');
   }
 
-  return await response.json();
+  console.log(`✓ Email sent to ${to} — ID: ${data.id}`);
+  return data;
 }
 
-// Generate confirmation email HTML
-async function generateTicketEmailHtml(ticketOrder, event) {
-  // Generate QR code
-  const qrCodeData = JSON.stringify({
-    confirmation_code: ticketOrder.confirmation_code,
-    event_id: ticketOrder.event_id,
-    ticket_type: ticketOrder.ticket_type,
-    quantity_adult: ticketOrder.quantity_adult,
-    quantity_child: ticketOrder.quantity_child,
-    customer_email: ticketOrder.customer_email
-  });
+function generateQRCodeUrl(text) {
+  // Use Google Charts API for QR code generation
+  return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(text)}`;
+}
 
-  const qrCodeDataUrl = await QRCode.toDataURL(qrCodeData, {
-    width: 400,
-    margin: 2,
-    color: { dark: '#000000', light: '#FFFFFF' }
-  });
+function buildTicketEmailHtml(ticket, event) {
+  const qrUrl = generateQRCodeUrl(ticket.confirmation_code);
+  const eventDate = event ? new Date(event.date).toLocaleDateString('en-CA', { 
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
+  }) : 'TBD';
+  const eventTime = event ? event.time : '';
+  const eventTitle = event ? event.title : 'Holmdale Pro Rodeo';
+  const venue = event ? event.venue : 'Holmdale Rodeo Grounds';
 
-  const eventDate = event.date
-    ? new Date(event.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-    : 'TBA';
+  const adultQty = ticket.quantity_adult || 0;
+  const childQty = ticket.quantity_child || 0;
+  const familyQty = ticket.quantity_family || 0;
+
+  let ticketLines = [];
+  if (adultQty > 0) ticketLines.push(`${adultQty}x Adult Ticket`);
+  if (childQty > 0) ticketLines.push(`${childQty}x Child Ticket (5-12)`);
+  if (familyQty > 0) ticketLines.push(`${familyQty}x Family Pass`);
+  const ticketSummary = ticketLines.join('<br>');
 
   return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background: #1c1917; color: white; padding: 30px; text-align: center; }
-        .content { padding: 30px; background: #f5f5f4; }
-        .ticket-details { background: white; padding: 20px; margin: 20px 0; border-radius: 8px; }
-        .qr-section { text-align: center; padding: 30px; background: white; margin: 20px 0; border-radius: 8px; }
-        .qr-code { max-width: 300px; margin: 20px auto; display: block; }
-        .confirmation-code { font-size: 24px; font-weight: bold; color: #1c1917; margin: 20px 0; }
-        .footer { text-align: center; padding: 20px; color: #78716c; font-size: 14px; }
-        table { width: 100%; }
-        td { padding: 8px 0; }
-        .label { font-weight: bold; color: #78716c; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <h1>🎟️ Your Tickets are Confirmed!</h1>
-        </div>
-        
-        <div class="content">
-          <p>Hi ${ticketOrder.customer_name},</p>
-          <p>Thank you for your purchase! Your tickets for <strong>${event.title || 'Holmdale Pro Rodeo'}</strong> are confirmed.</p>
-          
-          <div class="ticket-details">
-            <h2>Event Details</h2>
-            <table>
-              <tr><td class="label">Event:</td><td>${event.title || 'Holmdale Pro Rodeo'}</td></tr>
-              <tr><td class="label">Date:</td><td>${eventDate}</td></tr>
-              <tr><td class="label">Time:</td><td>${event.time || 'TBA'}</td></tr>
-              <tr><td class="label">Venue:</td><td>${event.venue || 'Holmdale Farms'}</td></tr>
-              <tr><td class="label">Ticket Type:</td><td>${(ticketOrder.ticket_type || 'general').toUpperCase()}</td></tr>
-              <tr><td class="label">Quantity:</td><td>${ticketOrder.quantity_adult || 0} Adult${(ticketOrder.quantity_adult || 0) !== 1 ? 's' : ''}${ticketOrder.quantity_child ? ', ' + ticketOrder.quantity_child + ' Child' + (ticketOrder.quantity_child !== 1 ? 'ren' : '') : ''}</td></tr>
-            </table>
-          </div>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0; padding:0; background:#f5f5f4; font-family: Arial, sans-serif;">
+  <div style="max-width:500px; margin:20px auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+    
+    <!-- Header -->
+    <div style="background:#1c1917; padding:24px; text-align:center;">
+      <h1 style="margin:0; color:#facc15; font-size:24px; letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
+      <p style="margin:8px 0 0; color:#a8a29e; font-size:14px;">Your Ticket Confirmation</p>
+    </div>
 
-          <div class="qr-section">
-            <h2>Your Entry Pass</h2>
-            <p>Show this QR code at the gate for entry:</p>
-            <div class="confirmation-code">${ticketOrder.confirmation_code}</div>
-            <img src="${qrCodeDataUrl}" alt="Ticket QR Code" class="qr-code" style="max-width: 300px; height: auto; display: block; margin: 20px auto;" />
-            <p style="color: #78716c; font-size: 14px; margin-top: 20px;">
-              Save this email or take a screenshot of the QR code<br>
-              You can also show your confirmation code at the gate
-            </p>
-          </div>
-
-          <p>We look forward to seeing you at the event!</p>
-        </div>
-        
-        <div class="footer">
-          <p>This is an automated confirmation email. Please do not reply.</p>
-        </div>
+    <!-- QR Code -->
+    <div style="text-align:center; padding:24px;">
+      <img src="${qrUrl}" alt="QR Code" style="width:180px; height:180px; border:4px solid #1c1917; border-radius:12px;">
+      <div style="margin-top:12px; font-size:24px; font-weight:bold; color:#1c1917; letter-spacing:3px;">
+        ${ticket.confirmation_code}
       </div>
-    </body>
-    </html>
-  `;
+      <p style="color:#78716c; font-size:12px; margin:4px 0 0;">Show this QR code at the gate</p>
+    </div>
+
+    <!-- Event Details -->
+    <div style="padding:0 24px 20px;">
+      <div style="background:#f5f5f4; border-radius:10px; padding:16px;">
+        <h2 style="margin:0 0 12px; color:#1c1917; font-size:18px;">${eventTitle}</h2>
+        <table style="width:100%; font-size:14px; color:#44403c;">
+          <tr><td style="padding:4px 0; font-weight:bold;">📅 Date</td><td>${eventDate}</td></tr>
+          <tr><td style="padding:4px 0; font-weight:bold;">🕐 Time</td><td>${eventTime}</td></tr>
+          <tr><td style="padding:4px 0; font-weight:bold;">📍 Venue</td><td>${venue}</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- Order Details -->
+    <div style="padding:0 24px 20px;">
+      <div style="border-top:1px solid #e7e5e4; padding-top:16px;">
+        <h3 style="margin:0 0 8px; color:#1c1917; font-size:16px;">Order Details</h3>
+        <table style="width:100%; font-size:14px; color:#44403c;">
+          <tr><td style="padding:4px 0; font-weight:bold;">Name</td><td>${ticket.customer_name}</td></tr>
+          <tr><td style="padding:4px 0; font-weight:bold;">Tickets</td><td>${ticketSummary}</td></tr>
+          <tr><td style="padding:4px 0; font-weight:bold;">Total</td><td style="font-size:18px; font-weight:bold; color:#16a34a;">$${parseFloat(ticket.total_price).toFixed(2)}</td></tr>
+        </table>
+      </div>
+    </div>
+
+    ${ticket.bar_credits > 0 ? `
+    <!-- Bar Credits -->
+    <div style="padding:0 24px 20px;">
+      <div style="background:#fef3c7; border-radius:10px; padding:12px 16px; text-align:center;">
+        <span style="font-size:20px;">🍺</span>
+        <span style="font-weight:bold; color:#92400e;">${ticket.bar_credits} Drink Ticket(s) included</span>
+        <p style="margin:4px 0 0; font-size:12px; color:#92400e;">Loaded to your wristband at the gate</p>
+      </div>
+    </div>
+    ` : ''}
+
+    <!-- Footer -->
+    <div style="background:#1c1917; padding:16px 24px; text-align:center;">
+      <p style="margin:0; color:#a8a29e; font-size:12px;">
+        Holmdale Rodeo Grounds — Walkerton, Ontario<br>
+        Questions? Contact us at info@holmdalerodeo.ca
+      </p>
+    </div>
+
+  </div>
+</body>
+</html>`;
 }
 
 // ============================================
 // POST /api/email/ticket-confirmation
-// Send ticket confirmation after payment success
+// Called after successful Moneris payment
 // ============================================
-router.post('/ticket-confirmation', authenticateToken, async (req, res) => {
+router.post('/ticket-confirmation', async (req, res) => {
   try {
-    const { confirmation_code } = req.body;
+    const { confirmation_code, orderId, ticketOrderId } = req.body;
+    const code = confirmation_code || orderId || ticketOrderId;
 
-    if (!confirmation_code) {
-      return res.status(400).json({ error: 'Missing confirmation_code' });
+    if (!code) {
+      return res.status(400).json({ error: 'No confirmation code provided' });
     }
 
-    // Find ticket order
-    const orderResult = await pool.query(
-      'SELECT * FROM ticket_orders WHERE confirmation_code = $1',
-      [confirmation_code]
+    console.log(`[Email] Processing confirmation for: ${code}`);
+
+    // Look up the ticket order
+    let ticket;
+    const result = await pool.query(
+      'SELECT * FROM ticket_orders WHERE confirmation_code = $1 OR id = $2',
+      [code, code]
     );
 
-    if (orderResult.rows.length === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Ticket order not found' });
     }
-    const ticketOrder = orderResult.rows[0];
 
-    // Update status to confirmed
-    await pool.query(
-      "UPDATE ticket_orders SET status = 'confirmed', updated_date = NOW() WHERE id = $1",
-      [ticketOrder.id]
-    );
+    ticket = result.rows[0];
 
-    // Get event details
-    let event = { title: 'Holmdale Pro Rodeo 2026', date: null, time: 'TBA', venue: 'Holmdale Farms' };
-    if (ticketOrder.event_id) {
-      const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [ticketOrder.event_id]);
-      if (eventResult.rows.length > 0) {
-        event = eventResult.rows[0];
-      }
-
-      // Decrement available tickets
-      try {
-        const totalQty = (ticketOrder.quantity_adult || 0) + (ticketOrder.quantity_child || 0);
-        await pool.query(
-          'UPDATE events SET tickets_sold = COALESCE(tickets_sold, 0) + $1 WHERE id = $2',
-          [totalQty || 1, ticketOrder.event_id]
-        );
-      } catch (e) {
-        console.error('Failed to update tickets_sold:', e.message);
-      }
+    if (!ticket.customer_email) {
+      console.log(`[Email] No email address for order ${code}`);
+      return res.status(400).json({ error: 'No customer email on order' });
     }
 
-    // Generate and send email
-    const emailHtml = await generateTicketEmailHtml(ticketOrder, event);
+    // Update payment status to confirmed
+    await pool.query(
+      'UPDATE ticket_orders SET payment_status = $1, updated_date = NOW() WHERE id = $2',
+      ['confirmed', ticket.id]
+    );
 
-    const emailResult = await sendEmail({
-      to: ticketOrder.customer_email,
-      subject: `Your Tickets for ${event.title || 'Holmdale Pro Rodeo'} - Confirmation #${ticketOrder.confirmation_code}`,
-      html: emailHtml
+    // Look up event details
+    let event = null;
+    if (ticket.event_id) {
+      const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [ticket.event_id]);
+      if (eventResult.rows.length > 0) event = eventResult.rows[0];
+    }
+
+    // Build and send email
+    const html = buildTicketEmailHtml(ticket, event);
+    await sendEmail({
+      to: ticket.customer_email,
+      subject: `🎟 Your Holmdale Pro Rodeo Tickets — ${ticket.confirmation_code}`,
+      html
     });
 
-    console.log(`✓ Confirmation email sent to ${ticketOrder.customer_email}, ID: ${emailResult.id}`);
+    // Update ticket to note email was sent
+    await pool.query(
+      'UPDATE ticket_orders SET payment_status = $1, updated_date = NOW() WHERE id = $2',
+      ['confirmed_emailed', ticket.id]
+    );
 
-    res.json({ success: true, email_sent: true, email_id: emailResult.id });
+    console.log(`✓ Confirmation email sent for ${ticket.confirmation_code} to ${ticket.customer_email}`);
+
+    res.json({ 
+      success: true, 
+      message: 'Confirmation email sent',
+      confirmation_code: ticket.confirmation_code,
+      email: ticket.customer_email
+    });
 
   } catch (error) {
-    console.error('Ticket confirmation email error:', error);
+    console.error('✗ Email error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
 // ============================================
 // POST /api/email/send-confirmation
-// Alias for ticket-confirmation (backward compatibility)
+// Alternative endpoint name (same logic)
 // ============================================
-router.post('/send-confirmation', authenticateToken, async (req, res) => {
+router.post('/send-confirmation', async (req, res) => {
   // Forward to ticket-confirmation handler
   req.url = '/ticket-confirmation';
   router.handle(req, res);
@@ -200,77 +221,72 @@ router.post('/send-confirmation', authenticateToken, async (req, res) => {
 
 // ============================================
 // POST /api/email/resend-ticket
-// Resend ticket confirmation email
+// Resend a confirmation email for an existing order
 // ============================================
-router.post('/resend-ticket', authenticateToken, async (req, res) => {
+router.post('/resend-ticket', async (req, res) => {
   try {
-    const { confirmation_code, ticketOrderId } = req.body;
+    const { confirmation_code, email } = req.body;
 
-    let ticketOrder;
-    if (confirmation_code) {
-      const result = await pool.query(
-        'SELECT * FROM ticket_orders WHERE confirmation_code = $1',
-        [confirmation_code]
-      );
-      ticketOrder = result.rows[0];
-    } else if (ticketOrderId) {
-      const result = await pool.query(
-        'SELECT * FROM ticket_orders WHERE id = $1',
-        [ticketOrderId]
-      );
-      ticketOrder = result.rows[0];
+    if (!confirmation_code) {
+      return res.status(400).json({ error: 'Confirmation code required' });
     }
 
-    if (!ticketOrder) {
-      return res.status(404).json({ error: 'Ticket order not found' });
+    const result = await pool.query(
+      'SELECT * FROM ticket_orders WHERE confirmation_code = $1',
+      [confirmation_code]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found' });
     }
 
-    // Get event details
-    let event = { title: 'Holmdale Pro Rodeo 2026', date: null, time: 'TBA', venue: 'Holmdale Farms' };
-    if (ticketOrder.event_id) {
-      const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [ticketOrder.event_id]);
-      if (eventResult.rows.length > 0) {
-        event = eventResult.rows[0];
-      }
+    const ticket = result.rows[0];
+    const sendTo = email || ticket.customer_email;
+
+    if (!sendTo) {
+      return res.status(400).json({ error: 'No email address' });
     }
 
-    const emailHtml = await generateTicketEmailHtml(ticketOrder, event);
+    let event = null;
+    if (ticket.event_id) {
+      const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [ticket.event_id]);
+      if (eventResult.rows.length > 0) event = eventResult.rows[0];
+    }
 
-    const emailResult = await sendEmail({
-      to: ticketOrder.customer_email,
-      subject: `Your Tickets (Resent) - Confirmation #${ticketOrder.confirmation_code}`,
-      html: emailHtml
+    const html = buildTicketEmailHtml(ticket, event);
+    await sendEmail({
+      to: sendTo,
+      subject: `🎟 Your Holmdale Pro Rodeo Tickets — ${ticket.confirmation_code}`,
+      html
     });
 
-    console.log(`✓ Ticket email resent to ${ticketOrder.customer_email}`);
-
-    res.json({ success: true, email_sent: true, email_id: emailResult.id });
+    console.log(`✓ Resent confirmation for ${ticket.confirmation_code} to ${sendTo}`);
+    res.json({ success: true, message: `Email resent to ${sendTo}` });
 
   } catch (error) {
-    console.error('Resend ticket email error:', error);
+    console.error('✗ Resend error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
 // ============================================
 // POST /api/email/test
-// Send a test email
+// Send a test email to verify Resend is working
 // ============================================
-router.post('/test', authenticateToken, async (req, res) => {
+router.post('/test', async (req, res) => {
   try {
     const { to } = req.body;
-    const recipient = to || 'darren@holmgraphics.ca';
+    const testTo = to || 'darren@holmgraphics.ca';
 
-    const emailResult = await sendEmail({
-      to: recipient,
-      subject: 'Holmdale Rodeo - Test Email',
-      html: '<h1>Test Email</h1><p>This is a test email from the Holmdale Rodeo system.</p>'
+    await sendEmail({
+      to: testTo,
+      subject: '🤠 Holmdale Rodeo — Email Test',
+      html: '<h1>Email is working!</h1><p>Your Resend integration is configured correctly.</p>'
     });
 
-    res.json({ success: true, email_id: emailResult.id });
-
+    res.json({ success: true, message: `Test email sent to ${testTo}` });
   } catch (error) {
-    console.error('Test email error:', error);
+    console.error('✗ Test email error:', error);
     res.status(500).json({ error: error.message });
   }
 });

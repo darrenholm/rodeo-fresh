@@ -19,6 +19,7 @@ const ticketOrderRoutes = require('./routes/ticketOrders');
 const productRoutes = require('./routes/products');
 const orderRoutes = require('./routes/orders');
 const dashboardRoutes = require('./routes/dashboard');
+const sponsorsVendorsRoutes = require('./routes/sponsors-vendors');
 
 // Wristbands & Bar
 const wristbandRoutes = require('./routes/wristbands');
@@ -130,6 +131,8 @@ app.use('/api/kitchen', kitchenRoutes);
 
 // NEW: Merchandise Sales (POS)
 app.use('/api/merch', merchRoutes);
+
+app.use('/api', sponsorsVendorsRoutes);
 
 // NEW: Wristband Transfer & Balance (public balance check + transfer)
 app.use('/api/wristbands', wristbandTransferRoutes);

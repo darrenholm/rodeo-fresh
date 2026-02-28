@@ -9,7 +9,7 @@ const pool = require('./config/database');
 // ============================================
 
 // Auth & Users
-const authRoutes = require('./routes/auth');            // Updated with roles support
+const authRoutes = require('./routes/auth');            // Updated with roles supporth
 const staffAuthRoutes = require('./routes/auth-routes');
 
 // Core data
@@ -123,7 +123,7 @@ app.use('/api/email', emailRoutes);
 app.use('/api/reports', reportRoutes);
 
 // NEW: Booth Menu (food menu, drink menu, ticket pricing)
-app.use('/api/booth', boothMenuRoutes);
+app.use('/api/booth/menu', boothMenuRoutes);
 
 // NEW: Kitchen Orders (kitchen display system)
 app.use('/api/kitchen', kitchenRoutes);

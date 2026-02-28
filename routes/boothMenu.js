@@ -49,7 +49,8 @@ module.exports = function(pool) {
     try {
       const boothId = req.query.booth || 'main';
       const { rows } = await pool.query(
-        `SELECT booth_name, tax_rate, tax_label, categories, menu_items, updated_at
+        `SELECT booth_name, tax_rate, tax_label, categories, menu_items, 
+                drink_categories, drink_menu, ticket_price, updated_at
          FROM booth_menu WHERE booth_id = $1`,
         [boothId]
       );

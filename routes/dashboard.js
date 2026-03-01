@@ -5,13 +5,13 @@ const router = express.Router();
 
 // ============================================
 // GET /api/dashboard/daily?date=YYYY-MM-DD
-// Daily stats for a given date
+// Daily stats for a given date (Eastern Time)
 // ============================================
 router.get('/daily', authenticateToken, async (req, res) => {
     try {
         const date = req.query.date || new Date().toISOString().split('T')[0];
 
-        // 1. Ticket orders for this date
+        // 1. Ticket orders for this date (Eastern timezone, all statuses)
         const ticketResult = await pool.query(`
             SELECT
                 COUNT(*) as order_count,
@@ -25,8 +25,7 @@ router.get('/daily', authenticateToken, async (req, res) => {
                     END
                 ), 0) as people_counted
             FROM ticket_orders
-            WHERE created_date::date = $1
-              AND status IN ('confirmed', 'paid')
+            WHERE (created_date AT TIME ZONE 'America/Toronto')::date = $1
         `, [date]);
 
         // 2. Ticket breakdown by type
@@ -44,8 +43,7 @@ router.get('/daily', authenticateToken, async (req, res) => {
                 ), 0) as people,
                 COALESCE(SUM(total_price::numeric), 0) as revenue
             FROM ticket_orders
-            WHERE created_date::date = $1
-              AND status IN ('confirmed', 'paid')
+            WHERE (created_date AT TIME ZONE 'America/Toronto')::date = $1
             GROUP BY ticket_type
             ORDER BY revenue DESC
         `, [date]);
@@ -54,14 +52,14 @@ router.get('/daily', authenticateToken, async (req, res) => {
         const gateResult = await pool.query(`
             SELECT COUNT(*) as gate_checkins
             FROM wristbands
-            WHERE created_date::date = $1
+            WHERE (created_date AT TIME ZONE 'America/Toronto')::date = $1
         `, [date]);
 
         // 4. Drink ticket sales (credits purchased on wristbands)
         const drinkTicketsResult = await pool.query(`
             SELECT COALESCE(SUM(credits), 0) as drink_tickets_sold
             FROM wristbands
-            WHERE created_date::date = $1
+            WHERE (created_date AT TIME ZONE 'America/Toronto')::date = $1
         `, [date]);
 
         // 5. Drinks served (bar purchases / transactions)
@@ -70,16 +68,15 @@ router.get('/daily', authenticateToken, async (req, res) => {
             const barResult = await pool.query(`
                 SELECT COALESCE(SUM(quantity), 0) as drinks_served
                 FROM bar_purchases
-                WHERE created_at::date = $1
+                WHERE (created_at AT TIME ZONE 'America/Toronto')::date = $1
             `, [date]);
             drinksServed = parseInt(barResult.rows[0].drinks_served) || 0;
         } catch(e) {
-            // Try bar_transactions if bar_purchases doesn't have quantity
             try {
                 const barResult2 = await pool.query(`
                     SELECT COUNT(*) as drinks_served
                     FROM bar_transactions
-                    WHERE created_at::date = $1
+                    WHERE (created_at AT TIME ZONE 'America/Toronto')::date = $1
                 `, [date]);
                 drinksServed = parseInt(barResult2.rows[0].drinks_served) || 0;
             } catch(e2) { /* table may not exist yet */ }
@@ -91,17 +88,16 @@ router.get('/daily', authenticateToken, async (req, res) => {
             const foodResult = await pool.query(`
                 SELECT COALESCE(SUM(total::numeric), 0) as food_revenue
                 FROM kitchen_orders
-                WHERE created_at::date = $1
+                WHERE (created_at AT TIME ZONE 'America/Toronto')::date = $1
                   AND status != 'cancelled'
             `, [date]);
             foodRevenue = parseFloat(foodResult.rows[0].food_revenue) || 0;
         } catch(e) {
-            // Try orders table as fallback
             try {
                 const foodResult2 = await pool.query(`
                     SELECT COALESCE(SUM(total_amount::numeric), 0) as food_revenue
                     FROM orders
-                    WHERE created_date::date = $1
+                    WHERE (created_date AT TIME ZONE 'America/Toronto')::date = $1
                       AND order_type = 'food'
                 `, [date]);
                 foodRevenue = parseFloat(foodResult2.rows[0].food_revenue) || 0;
@@ -114,7 +110,7 @@ router.get('/daily', authenticateToken, async (req, res) => {
             const merchResult = await pool.query(`
                 SELECT COALESCE(SUM(total::numeric), 0) as merch_revenue
                 FROM merch_sales
-                WHERE created_at::date = $1
+                WHERE (created_at AT TIME ZONE 'America/Toronto')::date = $1
             `, [date]);
             merchRevenue = parseFloat(merchResult.rows[0].merch_revenue) || 0;
         } catch(e) { /* table may not exist yet */ }

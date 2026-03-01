@@ -137,6 +137,39 @@ router.get('/daily', authenticateToken, async (req, res) => {
 });
 
 // ============================================
+// GET /api/dashboard/event-totals
+// Total tickets sold per event (all time)
+// ============================================
+router.get('/event-totals', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT 
+                e.id as event_id,
+                e.title as event_name,
+                e.date as event_date,
+                COUNT(t.id) as total_orders,
+                COALESCE(SUM(t.quantity_adult), 0) as total_adults,
+                COALESCE(SUM(t.quantity_child), 0) as total_children,
+                COALESCE(SUM(
+                    CASE
+                        WHEN LOWER(t.ticket_type) LIKE '%family%' THEN 4
+                        ELSE COALESCE(t.quantity_adult, 0) + COALESCE(t.quantity_child, 0)
+                    END
+                ), 0) as total_people,
+                COALESCE(SUM(t.total_price::numeric), 0) as total_revenue
+            FROM events e
+            LEFT JOIN ticket_orders t ON t.event_id::text = e.id::text
+            GROUP BY e.id, e.title, e.date
+            ORDER BY e.date ASC
+        `);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Event totals error:', error);
+        res.status(500).json({ error: 'Failed to fetch event totals' });
+    }
+});
+
+// ============================================
 // GET /api/dashboard/stats (existing endpoint)
 // ============================================
 router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {

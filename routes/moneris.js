@@ -3,7 +3,6 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
-// Moneris API endpoints
 const MONERIS_PRELOAD_URL = 'https://gateway.moneris.com/chkt/request/request.php';
 const MONERIS_CHECKOUT_URL = 'https://gateway.moneris.com/chkt/index.php';
 
@@ -16,12 +15,11 @@ setInterval(() => {
   for (const [code, data] of pendingCheckouts.entries()) {
     if (data.createdAt < oneHourAgo) {
       pendingCheckouts.delete(code);
-      console.log(`✗ Cleaned up abandoned checkout: ${code}`);
+      console.log(`Cleaned up abandoned checkout: ${code}`);
     }
   }
-}, 15 * 60 * 1000); // Run every 15 minutes
+}, 15 * 60 * 1000);
 
-// Helper: get Moneris credentials from env
 function getMonerisCredentials() {
   const storeId = process.env.MONERIS_STORE_ID;
   const apiToken = process.env.MONERIS_API_TOKEN;
@@ -34,7 +32,6 @@ function getMonerisCredentials() {
   return { storeId, apiToken, checkoutId };
 }
 
-// Helper: call Moneris preload API
 async function monerisPreload(data) {
   const response = await fetch(MONERIS_PRELOAD_URL, {
     method: 'POST',
@@ -58,8 +55,8 @@ async function monerisPreload(data) {
 
 // ============================================
 // POST /api/moneris/ticket-checkout
-// Create Moneris checkout for ticket purchases
-// NO database insert — order is created after payment
+// Creates Moneris checkout — NO database insert
+// Order is created only after payment succeeds
 // ============================================
 router.post('/ticket-checkout', async (req, res) => {
   try {
@@ -74,14 +71,12 @@ router.post('/ticket-checkout', async (req, res) => {
       return res.status(400).json({ error: 'No tickets selected' });
     }
 
-    // Fetch event for pricing
     const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [eventId]);
     if (eventResult.rows.length === 0) {
       return res.status(404).json({ error: 'Event not found' });
     }
     const event = eventResult.rows[0];
 
-    // Calculate tier pricing
     const ticketsSold = event.tickets_sold || 0;
     let currentTier = 1;
     if (ticketsSold >= event.tier2_quantity) {
@@ -94,7 +89,6 @@ router.post('/ticket-checkout', async (req, res) => {
     const childPrice = 10;
     const familyPrice = parseFloat(event[`tier${currentTier}_family_price`] || '70');
 
-    // Calculate totals
     const generalSubtotal = (tickets.general || 0) * adultPrice;
     const childSubtotal = (tickets.child || 0) * childPrice;
     const familySubtotal = (tickets.family || 0) * familyPrice;
@@ -103,14 +97,12 @@ router.post('/ticket-checkout', async (req, res) => {
     const hst = subtotal * 0.13;
     const total = subtotal + hst;
 
-    // Calculate wristband quantities
     const quantityAdult = (tickets.general || 0) + ((tickets.family || 0) * 2);
     const quantityChild = (tickets.child || 0) + ((tickets.family || 0) * 2);
 
-    // Generate confirmation code (but don't insert into DB yet)
     const confirmationCode = `WW-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
 
-    // Store checkout data in memory for later use after payment
+    // Store checkout data in memory — NOT in database
     pendingCheckouts.set(confirmationCode, {
       createdAt: Date.now(),
       eventId,
@@ -123,7 +115,6 @@ router.post('/ticket-checkout', async (req, res) => {
       barCredits: barCredits || 0
     });
 
-    // Create Moneris checkout
     const { storeId, apiToken, checkoutId } = getMonerisCredentials();
 
     const ticket = await monerisPreload({
@@ -164,7 +155,7 @@ router.post('/ticket-checkout', async (req, res) => {
 // ============================================
 // POST /api/moneris/confirm-payment
 // Called by frontend AFTER Moneris payment_complete
-// Creates the ticket order and sends confirmation email
+// Creates ticket order and sends confirmation email
 // ============================================
 router.post('/confirm-payment', async (req, res) => {
   try {
@@ -174,7 +165,7 @@ router.post('/confirm-payment', async (req, res) => {
       return res.status(400).json({ error: 'Confirmation code required' });
     }
 
-    // Check if order already exists (prevent duplicates)
+    // Prevent duplicates
     const existingOrder = await pool.query(
       'SELECT * FROM ticket_orders WHERE confirmation_code = $1',
       [confirmation_code]
@@ -184,14 +175,14 @@ router.post('/confirm-payment', async (req, res) => {
       return res.json({ success: true, message: 'Order already confirmed', confirmation_code });
     }
 
-    // Get the pending checkout data
+    // Get pending checkout data
     const checkoutData = pendingCheckouts.get(confirmation_code);
     if (!checkoutData) {
       console.error(`No pending checkout found for: ${confirmation_code}`);
       return res.status(404).json({ error: 'Checkout session not found or expired' });
     }
 
-    // Create ticket order in database NOW (after payment)
+    // NOW create the ticket order (after payment)
     const id = `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     const orderResult = await pool.query(
@@ -210,109 +201,100 @@ router.post('/confirm-payment', async (req, res) => {
     );
     const ticket = orderResult.rows[0];
 
-    // Update tickets_sold count on event
+    // Update tickets_sold on event
     const totalQuantity = (checkoutData.quantityAdult || 0) + (checkoutData.quantityChild || 0);
     await pool.query(
       'UPDATE events SET tickets_sold = COALESCE(tickets_sold, 0) + $1 WHERE id = $2',
       [totalQuantity, checkoutData.eventId]
     );
 
-    // Look up event details for email
-    let event = null;
-    const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [checkoutData.eventId]);
-    if (eventResult.rows.length > 0) event = eventResult.rows[0];
-
     // Send confirmation email
     try {
-      const emailRoutes = require('./email');
-      // We'll call the email function directly instead of making an HTTP request
-      const RESEND_API_URL = 'https://api.resend.com/emails';
       const apiKey = process.env.RESEND_API_KEY;
       const from = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 
       if (apiKey) {
+        let event = null;
+        const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [checkoutData.eventId]);
+        if (eventResult.rows.length > 0) event = eventResult.rows[0];
+
         const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(confirmation_code)}`;
         const eventDate = event ? new Date(event.date).toLocaleDateString('en-CA', {
           weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
         }) : 'TBD';
 
-        const adultQty = ticket.quantity_adult || 0;
-        const childQty = ticket.quantity_child || 0;
         let ticketLines = [];
-        if (adultQty > 0) ticketLines.push(`${adultQty}x Adult Ticket`);
-        if (childQty > 0) ticketLines.push(`${childQty}x Child Ticket`);
+        if (ticket.quantity_adult > 0) ticketLines.push(`${ticket.quantity_adult}x Adult Ticket`);
+        if (ticket.quantity_child > 0) ticketLines.push(`${ticket.quantity_child}x Child Ticket`);
         const ticketSummary = ticketLines.join('<br>');
 
-        const html = `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0; padding:0; background:#f5f5f4; font-family: Arial, sans-serif;">
-  <div style="max-width:500px; margin:20px auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-    <div style="background:#1c1917; padding:24px; text-align:center;">
-      <h1 style="margin:0; color:#facc15; font-size:24px; letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
-      <p style="margin:8px 0 0; color:#a8a29e; font-size:14px;">Your Ticket Confirmation</p>
-    </div>
-    <div style="text-align:center; padding:24px;">
-      <img src="${qrUrl}" alt="QR Code" style="width:180px; height:180px; border:4px solid #1c1917; border-radius:12px;">
-      <div style="margin-top:12px; font-size:24px; font-weight:bold; color:#1c1917; letter-spacing:3px;">${confirmation_code}</div>
-      <p style="color:#78716c; font-size:12px; margin:4px 0 0;">Show this QR code at the gate</p>
-    </div>
-    <div style="padding:0 24px 20px;">
-      <div style="background:#f5f5f4; border-radius:10px; padding:16px;">
-        <h2 style="margin:0 0 12px; color:#1c1917; font-size:18px;">${event ? event.title : 'Holmdale Pro Rodeo'}</h2>
-        <table style="width:100%; font-size:14px; color:#44403c;">
-          <tr><td style="padding:4px 0; font-weight:bold;">📅 Date</td><td>${eventDate}</td></tr>
-          <tr><td style="padding:4px 0; font-weight:bold;">🕐 Time</td><td>${event ? event.time : ''}</td></tr>
-          <tr><td style="padding:4px 0; font-weight:bold;">📍 Venue</td><td>${event ? event.venue : 'Holmdale Rodeo Grounds'}</td></tr>
-        </table>
-      </div>
-    </div>
-    <div style="padding:0 24px 20px;">
-      <div style="border-top:1px solid #e7e5e4; padding-top:16px;">
-        <h3 style="margin:0 0 8px; color:#1c1917; font-size:16px;">Order Details</h3>
-        <table style="width:100%; font-size:14px; color:#44403c;">
-          <tr><td style="padding:4px 0; font-weight:bold;">Name</td><td>${ticket.customer_name}</td></tr>
-          <tr><td style="padding:4px 0; font-weight:bold;">Tickets</td><td>${ticketSummary}</td></tr>
-          <tr><td style="padding:4px 0; font-weight:bold;">Total</td><td style="font-size:18px; font-weight:bold; color:#16a34a;">$${parseFloat(ticket.total_price).toFixed(2)}</td></tr>
-        </table>
-      </div>
-    </div>
-    <div style="background:#1c1917; padding:16px 24px; text-align:center;">
-      <p style="margin:0; color:#a8a29e; font-size:12px;">Holmdale Rodeo Grounds — Walkerton, Ontario<br>Questions? Contact us at info@holmdalerodeo.ca</p>
-    </div>
-  </div>
-</body>
-</html>`;
+        const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f5f5f4;font-family:Arial,sans-serif;">
+<div style="max-width:500px;margin:20px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+<div style="background:#1c1917;padding:24px;text-align:center;">
+<h1 style="margin:0;color:#facc15;font-size:24px;letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
+<p style="margin:8px 0 0;color:#a8a29e;font-size:14px;">Your Ticket Confirmation</p>
+</div>
+<div style="text-align:center;padding:24px;">
+<img src="${qrUrl}" alt="QR Code" style="width:180px;height:180px;border:4px solid #1c1917;border-radius:12px;">
+<div style="margin-top:12px;font-size:24px;font-weight:bold;color:#1c1917;letter-spacing:3px;">${confirmation_code}</div>
+<p style="color:#78716c;font-size:12px;margin:4px 0 0;">Show this QR code at the gate</p>
+</div>
+<div style="padding:0 24px 20px;">
+<div style="background:#f5f5f4;border-radius:10px;padding:16px;">
+<h2 style="margin:0 0 12px;color:#1c1917;font-size:18px;">${event ? event.title : 'Holmdale Pro Rodeo'}</h2>
+<table style="width:100%;font-size:14px;color:#44403c;">
+<tr><td style="padding:4px 0;font-weight:bold;">📅 Date</td><td>${eventDate}</td></tr>
+<tr><td style="padding:4px 0;font-weight:bold;">🕐 Time</td><td>${event ? event.time : ''}</td></tr>
+<tr><td style="padding:4px 0;font-weight:bold;">📍 Venue</td><td>${event ? event.venue : 'Holmdale Rodeo Grounds'}</td></tr>
+</table>
+</div>
+</div>
+<div style="padding:0 24px 20px;">
+<div style="border-top:1px solid #e7e5e4;padding-top:16px;">
+<h3 style="margin:0 0 8px;color:#1c1917;font-size:16px;">Order Details</h3>
+<table style="width:100%;font-size:14px;color:#44403c;">
+<tr><td style="padding:4px 0;font-weight:bold;">Name</td><td>${ticket.customer_name}</td></tr>
+<tr><td style="padding:4px 0;font-weight:bold;">Tickets</td><td>${ticketSummary}</td></tr>
+<tr><td style="padding:4px 0;font-weight:bold;">Total</td><td style="font-size:18px;font-weight:bold;color:#16a34a;">$${parseFloat(ticket.total_price).toFixed(2)}</td></tr>
+</table>
+</div>
+</div>
+${ticket.bar_credits > 0 ? `<div style="padding:0 24px 20px;"><div style="background:#fef3c7;border-radius:10px;padding:12px 16px;text-align:center;"><span style="font-size:20px;">🍺</span><span style="font-weight:bold;color:#92400e;">${ticket.bar_credits} Drink Ticket(s) included</span></div></div>` : ''}
+<div style="background:#1c1917;padding:16px 24px;text-align:center;">
+<p style="margin:0;color:#a8a29e;font-size:12px;">Holmdale Rodeo Grounds — Walkerton, Ontario<br>Questions? Contact us at info@holmdalerodeo.ca</p>
+</div>
+</div>
+</body></html>`;
 
-        await fetch(RESEND_API_URL, {
+        await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ from, to: [checkoutData.customerEmail], subject: `🎟 Your Holmdale Pro Rodeo Tickets — ${confirmation_code}`, html })
+          body: JSON.stringify({
+            from,
+            to: [checkoutData.customerEmail],
+            subject: `🎟 Your Holmdale Pro Rodeo Tickets — ${confirmation_code}`,
+            html
+          })
         });
 
-        // Update status to confirmed_emailed
         await pool.query(
           'UPDATE ticket_orders SET payment_status = $1, updated_date = NOW() WHERE id = $2',
           ['confirmed_emailed', id]
         );
 
-        console.log(`✓ Confirmation email sent for ${confirmation_code} to ${checkoutData.customerEmail}`);
+        console.log(`✓ Email sent for ${confirmation_code} to ${checkoutData.customerEmail}`);
       }
     } catch (emailErr) {
-      console.error('Email send failed (order still confirmed):', emailErr.message);
+      console.error('Email failed (order still confirmed):', emailErr.message);
     }
 
-    // Clean up pending checkout
+    // Clean up
     pendingCheckouts.delete(confirmation_code);
 
-    console.log(`✓ Payment confirmed and order created: ${confirmation_code}`);
-
-    res.json({
-      success: true,
-      confirmation_code,
-      message: 'Payment confirmed and ticket created'
-    });
+    console.log(`✓ Payment confirmed, order created: ${confirmation_code}`);
+    res.json({ success: true, confirmation_code, message: 'Payment confirmed and ticket created' });
 
   } catch (error) {
     console.error('Confirm payment error:', error);
@@ -347,7 +329,6 @@ router.post('/bar-checkout', authenticateToken, async (req, res) => {
     }
 
     const totalPrice = ticketQuantity * 0.07;
-
     const { storeId, apiToken, checkoutId } = getMonerisCredentials();
 
     const ticket = await monerisPreload({
@@ -357,13 +338,10 @@ router.post('/bar-checkout', authenticateToken, async (req, res) => {
       action: 'preload',
       txn_total: totalPrice.toFixed(2),
       order_no: `BAR-${Date.now()}`,
-      contact_details: {
-        first_name: name
-      }
+      contact_details: { first_name: name }
     });
 
-    console.log(`✓ Moneris bar checkout created: ${ticketQuantity} tickets, $${totalPrice.toFixed(2)}`);
-
+    console.log(`✓ Bar checkout created: ${ticketQuantity} tickets, $${totalPrice.toFixed(2)}`);
     res.json({ ticket, totalPrice });
 
   } catch (error) {
@@ -389,9 +367,7 @@ router.post('/merch-checkout', authenticateToken, async (req, res) => {
     }
     const hst = subtotal * 0.13;
     const total = subtotal + hst;
-
     const orderId = `MERCH-${Date.now()}`;
-
     const { storeId, apiToken, checkoutId } = getMonerisCredentials();
 
     const ticket = await monerisPreload({
@@ -400,11 +376,7 @@ router.post('/merch-checkout', authenticateToken, async (req, res) => {
       checkout_id: checkoutId,
       txn_total: total.toFixed(2),
       cart_subtotal: subtotal.toFixed(2),
-      tax: {
-        amount: hst.toFixed(2),
-        description: 'HST',
-        rate: '13.00'
-      },
+      tax: { amount: hst.toFixed(2), description: 'HST', rate: '13.00' },
       environment: 'prod',
       action: 'preload',
       order_no: orderId,
@@ -416,8 +388,7 @@ router.post('/merch-checkout', authenticateToken, async (req, res) => {
       }
     });
 
-    console.log(`✓ Moneris merch checkout created: ${orderId}, $${total.toFixed(2)}`);
-
+    console.log(`✓ Merch checkout created: ${orderId}, $${total.toFixed(2)}`);
     res.json({ ticket, order_id: orderId, total: total.toFixed(2) });
 
   } catch (error) {
@@ -448,13 +419,8 @@ router.post('/refund', authenticateToken, async (req, res) => {
       [ticketOrderId]
     );
 
-    console.log(`✓ Ticket ${order.confirmation_code} marked as refunded. Reason: ${reason || 'none'}`);
-
-    res.json({
-      success: true,
-      message: 'Ticket order refunded',
-      confirmation_code: order.confirmation_code
-    });
+    console.log(`✓ Ticket ${order.confirmation_code} refunded. Reason: ${reason || 'none'}`);
+    res.json({ success: true, message: 'Ticket order refunded', confirmation_code: order.confirmation_code });
 
   } catch (error) {
     console.error('Refund error:', error);
@@ -464,7 +430,7 @@ router.post('/refund', authenticateToken, async (req, res) => {
 
 // ============================================
 // POST /api/moneris/webhook
-// Handle Moneris payment completion webhook
+// Moneris server-side payment notification
 // ============================================
 router.post('/webhook', async (req, res) => {
   try {
@@ -475,27 +441,23 @@ router.post('/webhook', async (req, res) => {
     const success = data.success === 'true' || data.response?.success === 'true';
 
     if (!orderNo) {
-      console.error('Webhook missing order_no');
       return res.status(400).json({ error: 'Missing order_no' });
     }
 
     if (success) {
-      // Check if order was already created by confirm-payment endpoint
       const existing = await pool.query(
         'SELECT * FROM ticket_orders WHERE confirmation_code = $1',
         [orderNo]
       );
 
       if (existing.rows.length > 0) {
-        // Order already exists, just ensure it's confirmed
         await pool.query(
           `UPDATE ticket_orders SET status = 'confirmed', payment_status = 'paid', updated_date = NOW() 
            WHERE confirmation_code = $1 AND status != 'confirmed'`,
           [orderNo]
         );
-        console.log(`✓ Webhook: order ${orderNo} already exists, ensured confirmed`);
+        console.log(`✓ Webhook: ${orderNo} already exists, ensured confirmed`);
       } else {
-        // Order doesn't exist yet — create from pending checkout data
         const checkoutData = pendingCheckouts.get(orderNo);
         if (checkoutData) {
           const id = `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -521,13 +483,13 @@ router.post('/webhook', async (req, res) => {
           );
 
           pendingCheckouts.delete(orderNo);
-          console.log(`✓ Webhook: created order ${orderNo} from pending data`);
+          console.log(`✓ Webhook: created order ${orderNo}`);
         } else {
-          console.log(`⚠ Webhook: no pending data for ${orderNo}, order may have been lost`);
+          console.log(`⚠ Webhook: no pending data for ${orderNo}`);
         }
       }
     } else {
-      console.log(`✗ Payment failed for order: ${orderNo}`);
+      console.log(`✗ Payment failed: ${orderNo}`);
       pendingCheckouts.delete(orderNo);
     }
 

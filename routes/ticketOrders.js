@@ -63,6 +63,31 @@ router.get('/confirmation/:code', async (req, res) => {
   }
 });
 
+// POST search ticket orders by name or email
+router.post('/search', authenticateToken, async (req, res) => {
+  try {
+    const { searchValue, searchType } = req.body;
+    if (!searchValue) {
+      return res.status(400).json({ error: 'Search value required' });
+    }
+    
+    let query;
+    const searchPattern = `%${searchValue}%`;
+    
+    if (searchType === 'email') {
+      query = 'SELECT * FROM ticket_orders WHERE customer_email ILIKE $1 ORDER BY created_date DESC';
+    } else {
+      query = 'SELECT * FROM ticket_orders WHERE customer_name ILIKE $1 OR customer_email ILIKE $1 OR confirmation_code ILIKE $1 ORDER BY created_date DESC';
+    }
+    
+    const result = await pool.query(query, [searchPattern]);
+    res.json({ results: result.rows });
+  } catch (error) {
+    console.error('Error searching tickets:', error);
+    res.status(500).json({ error: 'Failed to search tickets' });
+  }
+});
+
 // POST create ticket order
 router.post('/', async (req, res) => {
   const { event_id, customer_name, customer_email, customer_phone, ticket_type, quantity_adult, quantity_child, total_price } = req.body;
@@ -116,6 +141,7 @@ router.put('/:id/status', authenticateToken, requireAdmin, async (req, res) => {
     res.status(500).json({ error: 'Failed to update ticket' });
   }
 });
+
 // POST scan ticket and save RFID
 router.post('/:id/scan', authenticateToken, async (req, res) => {
   try {

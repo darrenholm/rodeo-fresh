@@ -255,5 +255,104 @@ router.delete('/sign-locations/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// ╔══════════════════════════════════════════╗
+// ║     PUBLIC VENDOR REGISTRATION           ║
+// ╚══════════════════════════════════════════╝
 
+// POST /api/vendors/register — public, no auth
+router.post('/vendors/register', async (req, res) => {
+  try {
+    const { name, contact_name, phone, email, city, province, address, postal_code, product, booth_size, vendor_type, comment, payment_method } = req.body;
+
+    if (!name || !contact_name || !email || !phone) {
+      return res.status(400).json({ error: 'Business name, contact name, email, and phone are required' });
+    }
+
+    // Check for duplicate registration
+    const existing = await pool.query(
+      'SELECT id FROM vendors WHERE email = $1 AND name = $2',
+      [email, name]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'This business has already registered' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO vendors (name, contact_name, phone, email, city, province, address, postal_code, product, booth_size, comment)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [name, contact_name, phone, email, city, province, address || '', postal_code || '', product || '', booth_size || '', 
+       `Type: ${vendor_type || 'not specified'}. Payment: ${payment_method || 'pay later'}. ${comment || ''}`]
+    );
+
+    const vendor = result.rows[0];
+
+    // Send confirmation email
+    try {
+      const apiKey = process.env.RESEND_API_KEY;
+      const from = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+
+      if (apiKey) {
+        const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f5f5f4;font-family:Arial,sans-serif;">
+<div style="max-width:500px;margin:20px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+<div style="background:#1c1917;padding:24px;text-align:center;">
+<h1 style="margin:0;color:#facc15;font-size:24px;letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
+<p style="margin:8px 0 0;color:#a8a29e;font-size:14px;">Vendor Registration Confirmed</p>
+</div>
+<div style="padding:24px;">
+<h2 style="margin:0 0 16px;color:#1c1917;font-size:20px;">Welcome, ${contact_name}!</h2>
+<p style="color:#44403c;font-size:14px;line-height:1.6;">Thank you for registering <strong>${name}</strong> as a vendor for the Holmdale Pro Rodeo. We're excited to have you join us!</p>
+<div style="background:#f5f5f4;border-radius:10px;padding:16px;margin:16px 0;">
+<h3 style="margin:0 0 12px;color:#1c1917;font-size:16px;">Registration Details</h3>
+<table style="width:100%;font-size:14px;color:#44403c;">
+<tr><td style="padding:4px 0;font-weight:bold;">Business</td><td>${name}</td></tr>
+<tr><td style="padding:4px 0;font-weight:bold;">Contact</td><td>${contact_name}</td></tr>
+<tr><td style="padding:4px 0;font-weight:bold;">Email</td><td>${email}</td></tr>
+<tr><td style="padding:4px 0;font-weight:bold;">Phone</td><td>${phone}</td></tr>
+<tr><td style="padding:4px 0;font-weight:bold;">Vendor Type</td><td>${vendor_type || 'Not specified'}</td></tr>
+<tr><td style="padding:4px 0;font-weight:bold;">Booth Size</td><td>${booth_size || 'Not specified'}</td></tr>
+<tr><td style="padding:4px 0;font-weight:bold;">Payment</td><td>${payment_method === 'pay_now' ? 'Paid online' : 'Invoice to follow'}</td></tr>
+</table>
+</div>
+<p style="color:#44403c;font-size:14px;line-height:1.6;">Our team will be in touch shortly with next steps, including booth assignment and event details.</p>
+<p style="color:#44403c;font-size:14px;line-height:1.6;"><strong>Event Dates:</strong> July 31 - August 2, 2026<br><strong>Location:</strong> 588 Sideroad 10 S., Walkerton, ON</p>
+</div>
+<div style="background:#1c1917;padding:16px 24px;text-align:center;">
+<p style="margin:0;color:#a8a29e;font-size:12px;">Holmdale Rodeo Grounds — Walkerton, Ontario<br>Questions? Contact us at info@holmdalerodeo.ca</p>
+</div>
+</div>
+</body></html>`;
+
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from, to: [email], subject: '🤠 Holmdale Pro Rodeo — Vendor Registration Confirmed', html })
+        });
+
+        // Also notify admin
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from, to: ['darren@holmgraphics.ca'],
+            subject: `📋 New Vendor Registration: ${name}`,
+            html: `<h2>New Vendor Registration</h2><p><strong>${name}</strong> (${contact_name}) registered as a ${vendor_type} vendor.</p><p>Email: ${email} | Phone: ${phone}</p><p>Booth: ${booth_size} | Payment: ${payment_method}</p><p>Products: ${product || 'N/A'}</p><p>Notes: ${comment || 'None'}</p>`
+          })
+        });
+
+        console.log(`✓ Vendor registration email sent to ${email}`);
+      }
+    } catch (emailErr) {
+      console.error('Vendor email failed:', emailErr.message);
+    }
+
+    console.log(`✓ Vendor registered: ${name} (${contact_name})`);
+    res.json({ success: true, vendor: result.rows[0] });
+
+  } catch (error) {
+    console.error('Vendor registration error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 module.exports = router;

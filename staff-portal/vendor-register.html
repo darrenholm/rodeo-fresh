@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vendor Registration - Holmdale Pro Rodeo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f4;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 650px; margin: 0 auto; }
+        .header {
+            background: #1c1917;
+            padding: 30px;
+            border-radius: 15px 15px 0 0;
+            text-align: center;
+        }
+        .header h1 { color: #facc15; font-size: 28px; letter-spacing: 2px; margin-bottom: 5px; }
+        .header h2 { color: #a8a29e; font-size: 18px; font-weight: normal; margin-bottom: 5px; }
+        .header p { color: #78716c; font-size: 14px; }
+        .form-body {
+            background: white;
+            padding: 30px;
+            border-radius: 0 0 15px 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #1c1917;
+            margin: 25px 0 15px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #00B74A;
+        }
+        .section-title:first-child { margin-top: 0; }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .form-row.full { grid-template-columns: 1fr; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label {
+            font-size: 14px;
+            font-weight: 600;
+            color: #44403c;
+            margin-bottom: 5px;
+        }
+        .form-group label .required { color: #ef4444; }
+        .form-group input, .form-group select, .form-group textarea {
+            padding: 12px 14px;
+            font-size: 15px;
+            border: 2px solid #e7e5e4;
+            border-radius: 10px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            border-color: #00B74A;
+        }
+        .form-group textarea { resize: vertical; min-height: 80px; }
+        .radio-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .radio-option {
+            position: relative;
+            cursor: pointer;
+        }
+        .radio-option input { position: absolute; opacity: 0; }
+        .radio-option .radio-label {
+            display: block;
+            padding: 14px 16px;
+            border: 2px solid #e7e5e4;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: #44403c;
+            transition: all 0.2s;
+        }
+        .radio-option .radio-desc {
+            display: block;
+            font-size: 12px;
+            font-weight: normal;
+            color: #78716c;
+            margin-top: 2px;
+        }
+        .radio-option input:checked + .radio-label {
+            border-color: #00B74A;
+            background: #f0fdf4;
+            color: #166534;
+        }
+        .booth-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .booth-option {
+            position: relative;
+            cursor: pointer;
+        }
+        .booth-option input { position: absolute; opacity: 0; }
+        .booth-option .booth-label {
+            display: block;
+            padding: 16px;
+            border: 2px solid #e7e5e4;
+            border-radius: 10px;
+            text-align: center;
+            transition: all 0.2s;
+        }
+        .booth-option .booth-label .booth-icon { font-size: 28px; margin-bottom: 4px; }
+        .booth-option .booth-label .booth-name { font-size: 14px; font-weight: 600; color: #1c1917; }
+        .booth-option .booth-label .booth-price { font-size: 13px; color: #00B74A; font-weight: 600; margin-top: 4px; }
+        .booth-option input:checked + .booth-label {
+            border-color: #00B74A;
+            background: #f0fdf4;
+        }
+        .payment-section {
+            background: #f5f5f4;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .payment-toggle {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .payment-toggle label {
+            position: relative;
+            cursor: pointer;
+        }
+        .payment-toggle input { position: absolute; opacity: 0; }
+        .payment-toggle .pay-label {
+            display: block;
+            padding: 14px;
+            border: 2px solid #e7e5e4;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 600;
+            background: white;
+            transition: all 0.2s;
+        }
+        .payment-toggle input:checked + .pay-label {
+            border-color: #00B74A;
+            background: #f0fdf4;
+            color: #166534;
+        }
+        .payment-note {
+            font-size: 13px;
+            color: #78716c;
+            text-align: center;
+            margin-top: 8px;
+        }
+        .submit-btn {
+            width: 100%;
+            padding: 16px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #00B74A;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: background 0.2s;
+        }
+        .submit-btn:hover { background: #009a3e; }
+        .submit-btn:disabled { background: #a0aec0; cursor: not-allowed; }
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .alert {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        .alert-error { background: #fed7d7; color: #742a2a; border-left: 4px solid #f56565; }
+        .alert-success { background: #c6f6d5; color: #22543d; border-left: 4px solid #48bb78; }
+        .success-screen {
+            text-align: center;
+            padding: 40px 20px;
+        }
+        .success-screen .icon { font-size: 64px; margin-bottom: 20px; }
+        .success-screen h2 { color: #1c1917; font-size: 24px; margin-bottom: 10px; }
+        .success-screen p { color: #44403c; font-size: 16px; line-height: 1.6; }
+        .event-info {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 10px;
+            padding: 16px;
+            margin: 10px 0 20px;
+            text-align: center;
+        }
+        .event-info strong { color: #166534; }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #78716c;
+            font-size: 13px;
+        }
+        @media (max-width: 600px) {
+            .form-row { grid-template-columns: 1fr; }
+            .radio-group { grid-template-columns: 1fr; }
+            .booth-options { grid-template-columns: 1fr; }
+            .payment-toggle { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤠 HOLMDALE PRO RODEO</h1>
+            <h2>Vendor Registration</h2>
+            <p>July 31 - August 2, 2026 • Walkerton, Ontario</p>
+        </div>
+
+        <div class="form-body" id="formBody">
+            <div class="event-info">
+                <strong>📅 Event Dates:</strong> July 31 - August 2, 2026<br>
+                <strong>📍 Location:</strong> 588 Sideroad 10 S., Walkerton, ON
+            </div>
+
+            <div id="alertContainer"></div>
+
+            <div id="registrationForm">
+                <div class="section-title">Business Information</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Business Name <span class="required">*</span></label>
+                        <input type="text" id="businessName" placeholder="Your Business Name">
+                    </div>
+                    <div class="form-group">
+                        <label>Contact Name <span class="required">*</span></label>
+                        <input type="text" id="contactName" placeholder="Full Name">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Email <span class="required">*</span></label>
+                        <input type="email" id="email" placeholder="you@business.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Phone <span class="required">*</span></label>
+                        <input type="tel" id="phone" placeholder="(555) 123-4567">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>City</label>
+                        <input type="text" id="city" placeholder="City">
+                    </div>
+                    <div class="form-group">
+                        <label>Province</label>
+                        <select id="province">
+                            <option value="">Select Province</option>
+                            <option value="ON" selected>Ontario</option>
+                            <option value="AB">Alberta</option>
+                            <option value="BC">British Columbia</option>
+                            <option value="MB">Manitoba</option>
+                            <option value="NB">New Brunswick</option>
+                            <option value="NL">Newfoundland</option>
+                            <option value="NS">Nova Scotia</option>
+                            <option value="PE">PEI</option>
+                            <option value="QC">Quebec</option>
+                            <option value="SK">Saskatchewan</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="section-title">Vendor Type</div>
+                <div class="radio-group">
+                    <label class="radio-option">
+                        <input type="radio" name="vendorType" value="food">
+                        <span class="radio-label">🍔 Food Vendor<span class="radio-desc">Prepared food & beverages</span></span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="vendorType" value="merchandise">
+                        <span class="radio-label">🛍️ Merchandise<span class="radio-desc">Retail products & goods</span></span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="vendorType" value="service">
+                        <span class="radio-label">🔧 Service<span class="radio-desc">Services & demonstrations</span></span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="vendorType" value="sponsor">
+                        <span class="radio-label">🤝 Sponsor<span class="radio-desc">Sponsorship & promotion</span></span>
+                    </label>
+                </div>
+
+                <div class="section-title">Booth Selection</div>
+                <div class="booth-options">
+                    <label class="booth-option">
+                        <input type="radio" name="boothSize" value="10x10">
+                        <span class="booth-label">
+                            <div class="booth-icon">🏕️</div>
+                            <div class="booth-name">10 x 10</div>
+                            <div class="booth-price">Pricing TBD</div>
+                        </span>
+                    </label>
+                    <label class="booth-option">
+                        <input type="radio" name="boothSize" value="10x20">
+                        <span class="booth-label">
+                            <div class="booth-icon">🎪</div>
+                            <div class="booth-name">10 x 20</div>
+                            <div class="booth-price">Pricing TBD</div>
+                        </span>
+                    </label>
+                    <label class="booth-option">
+                        <input type="radio" name="boothSize" value="food_vendor">
+                        <span class="booth-label">
+                            <div class="booth-icon">🍔</div>
+                            <div class="booth-name">Food Vendor Spot</div>
+                            <div class="booth-price">Pricing TBD</div>
+                        </span>
+                    </label>
+                    <label class="booth-option">
+                        <input type="radio" name="boothSize" value="custom">
+                        <span class="booth-label">
+                            <div class="booth-icon">📐</div>
+                            <div class="booth-name">Custom / Contact Us</div>
+                            <div class="booth-price">Let's talk</div>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="section-title">Products / Services</div>
+                <div class="form-row full">
+                    <div class="form-group">
+                        <label>Describe what you'll be selling or offering</label>
+                        <textarea id="product" placeholder="Tell us about your products or services..."></textarea>
+                    </div>
+                </div>
+                <div class="form-row full">
+                    <div class="form-group">
+                        <label>Additional Comments or Requests</label>
+                        <textarea id="comment" placeholder="Power requirements, special setup needs, etc."></textarea>
+                    </div>
+                </div>
+
+                <div class="section-title">Payment</div>
+                <div class="payment-section">
+                    <div class="payment-toggle">
+                        <label>
+                            <input type="radio" name="paymentMethod" value="pay_later" checked>
+                            <span class="pay-label">📧 Pay Later<br><small style="font-weight:normal;color:#78716c;">We'll send an invoice</small></span>
+                        </label>
+                        <label>
+                            <input type="radio" name="paymentMethod" value="pay_now">
+                            <span class="pay-label">💳 Pay Now<br><small style="font-weight:normal;color:#78716c;">Pay by credit card</small></span>
+                        </label>
+                    </div>
+                    <div class="payment-note" id="paymentNote">You'll receive an invoice by email after registration.</div>
+                </div>
+
+                <button class="submit-btn" id="submitBtn" onclick="handleSubmit()">Submit Registration</button>
+            </div>
+
+            <div id="successScreen" style="display:none;">
+                <div class="success-screen">
+                    <div class="icon">✅</div>
+                    <h2>Registration Complete!</h2>
+                    <p>Thank you for registering as a vendor for the Holmdale Pro Rodeo.</p>
+                    <p>A confirmation email has been sent to <strong id="confirmEmail"></strong>.</p>
+                    <p style="margin-top:20px;color:#78716c;">Our team will be in touch shortly with booth assignment details and next steps.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Holmdale Pro Rodeo • August 2026 • Walkerton, Ontario</p>
+            <p>Questions? Email <a href="mailto:info@holmdalerodeo.ca" style="color:#00B74A;">info@holmdalerodeo.ca</a></p>
+        </div>
+    </div>
+
+    <script>
+        const API = 'https://rodeo-fresh-production-7348.up.railway.app/api';
+
+        // Update payment note when toggling
+        document.querySelectorAll('input[name="paymentMethod"]').forEach(function(radio) {
+            radio.addEventListener('change', function() {
+                var note = document.getElementById('paymentNote');
+                if (this.value === 'pay_now') {
+                    note.textContent = 'You\'ll be redirected to our secure payment page after submitting.';
+                } else {
+                    note.textContent = 'You\'ll receive an invoice by email after registration.';
+                }
+            });
+        });
+
+        async function handleSubmit() {
+            var btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Submitting...';
+
+            var businessName = document.getElementById('businessName').value.trim();
+            var contactName = document.getElementById('contactName').value.trim();
+            var email = document.getElementById('email').value.trim();
+            var phone = document.getElementById('phone').value.trim();
+            var city = document.getElementById('city').value.trim();
+            var province = document.getElementById('province').value;
+            var product = document.getElementById('product').value.trim();
+            var comment = document.getElementById('comment').value.trim();
+
+            var vendorType = '';
+            var vendorRadio = document.querySelector('input[name="vendorType"]:checked');
+            if (vendorRadio) vendorType = vendorRadio.value;
+
+            var boothSize = '';
+            var boothRadio = document.querySelector('input[name="boothSize"]:checked');
+            if (boothRadio) boothSize = boothRadio.value;
+
+            var paymentMethod = 'pay_later';
+            var payRadio = document.querySelector('input[name="paymentMethod"]:checked');
+            if (payRadio) paymentMethod = payRadio.value;
+
+            // Validate
+            if (!businessName || !contactName || !email || !phone) {
+                showMessage('Please fill in all required fields (Business Name, Contact Name, Email, Phone).', 'error');
+                btn.disabled = false;
+                btn.textContent = 'Submit Registration';
+                return;
+            }
+
+            if (!email.includes('@')) {
+                showMessage('Please enter a valid email address.', 'error');
+                btn.disabled = false;
+                btn.textContent = 'Submit Registration';
+                return;
+            }
+
+            try {
+                var r = await fetch(API + '/vendors/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: businessName,
+                        contact_name: contactName,
+                        email: email,
+                        phone: phone,
+                        city: city,
+                        province: province,
+                        product: product,
+                        booth_size: boothSize,
+                        vendor_type: vendorType,
+                        comment: comment,
+                        payment_method: paymentMethod
+                    })
+                });
+
+                var data = await r.json();
+
+                if (!r.ok) {
+                    throw new Error(data.error || 'Registration failed');
+                }
+
+                // If pay now, redirect to Moneris (future feature)
+                if (paymentMethod === 'pay_now') {
+                    // For now, just show success — Moneris integration can be added when pricing is set
+                    showSuccess(email);
+                } else {
+                    showSuccess(email);
+                }
+
+            } catch (err) {
+                console.error('Registration error:', err);
+                showMessage(err.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Submit Registration';
+            }
+        }
+
+        function showSuccess(email) {
+            document.getElementById('registrationForm').style.display = 'none';
+            document.getElementById('successScreen').style.display = 'block';
+            document.getElementById('confirmEmail').textContent = email;
+        }
+
+        function showMessage(msg, type) {
+            var container = document.getElementById('alertContainer');
+            container.innerHTML = '<div class="alert alert-' + type + '">' + msg + '</div>';
+            container.scrollIntoView({ behavior: 'smooth' });
+            setTimeout(function() { container.innerHTML = ''; }, 5000);
+        }
+    </script>
+</body>
+</html>

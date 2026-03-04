@@ -290,5 +290,64 @@ router.post('/test', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// ============================================
+// POST /api/email/vendor-invite
+// Send vendor registration form link by email
+// ============================================
+router.post('/vendor-invite', authenticateToken, async (req, res) => {
+  try {
+    const { to, vendor_name, personal_message } = req.body;
 
+    if (!to) {
+      return res.status(400).json({ error: 'Email address required' });
+    }
+
+    const regUrl = 'https://staff.holmdalerodeo.ca/vendor-register.html';
+    const greeting = vendor_name ? `Hi ${vendor_name},` : 'Hello,';
+    const personalNote = personal_message
+      ? `<p style="color:#44403c;font-size:14px;line-height:1.6;background:#f5f5f4;border-radius:8px;padding:12px;margin:16px 0;font-style:italic;">"${personal_message}"</p>`
+      : '';
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f5f5f4;font-family:Arial,sans-serif;">
+<div style="max-width:500px;margin:20px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+<div style="background:#1c1917;padding:24px;text-align:center;">
+<h1 style="margin:0;color:#facc15;font-size:24px;letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
+<p style="margin:8px 0 0;color:#a8a29e;font-size:14px;">Vendor Registration Invitation</p>
+</div>
+<div style="padding:24px;">
+<p style="color:#44403c;font-size:14px;line-height:1.6;">${greeting}</p>
+<p style="color:#44403c;font-size:14px;line-height:1.6;">You're invited to register as a vendor for the <strong>Holmdale Pro Rodeo</strong>! We'd love to have you join us for an exciting weekend of rodeo action and great crowds.</p>
+${personalNote}
+<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin:20px 0;text-align:center;">
+<p style="margin:0 0 4px;color:#166534;font-weight:bold;font-size:16px;">📅 July 31 - August 2, 2026</p>
+<p style="margin:0;color:#166534;font-size:14px;">📍 588 Sideroad 10 S., Walkerton, ON</p>
+</div>
+<div style="text-align:center;margin:24px 0;">
+<a href="${regUrl}" style="display:inline-block;padding:16px 40px;background:#00B74A;color:white;font-size:18px;font-weight:bold;text-decoration:none;border-radius:10px;">Register Now</a>
+</div>
+<p style="color:#78716c;font-size:13px;line-height:1.6;">Click the button above to fill out the registration form. You'll be able to select your booth size and vendor type. Booth pricing details will follow.</p>
+<p style="color:#78716c;font-size:13px;">Or copy this link: <a href="${regUrl}" style="color:#00B74A;">${regUrl}</a></p>
+</div>
+<div style="background:#1c1917;padding:16px 24px;text-align:center;">
+<p style="margin:0;color:#a8a29e;font-size:12px;">Holmdale Rodeo Grounds — Walkerton, Ontario<br>Questions? Contact us at info@holmdalerodeo.ca</p>
+</div>
+</div>
+</body></html>`;
+
+    await sendEmail({
+      to: to,
+      subject: '🤠 You\'re Invited — Vendor Registration for Holmdale Pro Rodeo',
+      html
+    });
+
+    console.log(`✓ Vendor invite sent to ${to}`);
+    res.json({ success: true, message: `Invitation sent to ${to}` });
+
+  } catch (error) {
+    console.error('Vendor invite error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 module.exports = router;

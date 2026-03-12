@@ -500,5 +500,90 @@ router.post('/webhook', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// =============================================
+// POST /api/moneris/terminal-purchase
+// Pushes a purchase to the PAX A920 via
+// Moneris Cloud IPgate API (XML over HTTPS)
+// =============================================
+router.post('/terminal-purchase', async (req, res) => {
+  try {
+    const { totalAmount, order_id } = req.body;
 
+    if (!totalAmount || !order_id) {
+      return res.status(400).json({ error: 'totalAmount and order_id are required' });
+    }
+
+    const storeId    = process.env.MONERIS_STORE_ID;
+    const apiToken   = process.env.MONERIS_API_TOKEN;
+    const terminalId = process.env.MONERIS_TERMINAL_ID;
+
+    if (!storeId || !apiToken || !terminalId) {
+      return res.status(500).json({ error: 'Moneris terminal credentials not configured' });
+    }
+
+    // Convert cents string to dollar amount string (e.g. "3390" -> "33.90")
+    const amountCents = parseInt(totalAmount, 10);
+    const amountDollars = (amountCents / 100).toFixed(2);
+
+    // Build Moneris Cloud IPgate XML request
+    const xmlBody = `<?xml version="1.0" encoding="UTF-8"?>
+<request>
+  <store_id>${storeId}</store_id>
+  <api_token>${apiToken}</api_token>
+  <request_type>cloud_purchase</request_type>
+  <cloud_purchase>
+    <order_id>${order_id}</order_id>
+    <amount>${amountDollars}</amount>
+    <terminal_id>${terminalId}</terminal_id>
+    <dynamic_descriptor>Holmdale Rodeo</dynamic_descriptor>
+  </cloud_purchase>
+</request>`;
+
+    console.log(`[Moneris] Sending terminal purchase: order=${order_id} amount=$${amountDollars}`);
+
+    const monerisResp = await fetch('https://ippos.moneris.com/Terminal/Purchase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml; charset=UTF-8' },
+      body: xmlBody,
+      signal: AbortSignal.timeout(60000) // 60s timeout for customer to tap card
+    });
+
+    const xmlText = await monerisResp.text();
+    console.log('[Moneris] Raw response:', xmlText);
+
+    // Parse key fields from XML response
+    const get = (tag) => {
+      const m = xmlText.match(new RegExp(`<${tag}>([^<]*)<\/${tag}>`));
+      return m ? m[1].trim() : null;
+    };
+
+    const responseCode = get('response_code');
+    const message      = get('message') || get('Message');
+    const txnNum       = get('txn_num') || get('transaction_no');
+    const approved     = responseCode && parseInt(responseCode, 10) < 50;
+
+    if (approved) {
+      console.log(`[Moneris] Approved: ${responseCode} - ${message}`);
+      return res.json({
+        receipt: {
+          ResponseCode: parseInt(responseCode, 10),
+          Message: message,
+          TransactionNumber: txnNum,
+          response_code: responseCode
+        }
+      });
+    } else {
+      console.warn(`[Moneris] Declined/Error: ${responseCode} - ${message}`);
+      return res.status(402).json({
+        error: message || 'Transaction declined',
+        response_code: responseCode,
+        receipt: { ResponseCode: parseInt(responseCode || '99', 10), Message: message }
+      });
+    }
+
+  } catch (error) {
+    console.error('[Moneris] Terminal purchase error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
 module.exports = router;

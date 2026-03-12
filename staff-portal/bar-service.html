@@ -348,6 +348,7 @@
 
                 if (!r.ok) {
                     showMessage('❌ Wristband not found', 'error');
+                                        setTimeout(clearMessage, 3000);
                     this.value = '';
                     this.focus();
                     return;

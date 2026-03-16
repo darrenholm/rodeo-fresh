@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const QRCode = require('qrcode'); // ← ADD THIS to package.json: npm install qrcode
 
 const MONERIS_PRELOAD_URL = 'https://gateway.moneris.com/chkt/request/request.php';
 const MONERIS_CHECKOUT_URL = 'https://gateway.moneris.com/chkt/index.php';
@@ -24,11 +25,9 @@ function getMonerisCredentials() {
   const storeId = process.env.MONERIS_STORE_ID;
   const apiToken = process.env.MONERIS_API_TOKEN;
   const checkoutId = process.env.MONERIS_CHECKOUT_ID;
-
   if (!storeId || !apiToken || !checkoutId) {
     throw new Error('Moneris credentials not configured');
   }
-
   return { storeId, apiToken, checkoutId };
 }
 
@@ -38,18 +37,14 @@ async function monerisPreload(data) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`Moneris API error: ${response.status} - ${errorText}`);
   }
-
   const result = await response.json();
-
   if (!result.response || result.response.success !== 'true' || !result.response.ticket) {
     throw new Error('Failed to create Moneris checkout: ' + JSON.stringify(result));
   }
-
   return result.response.ticket;
 }
 
@@ -116,18 +111,13 @@ router.post('/ticket-checkout', async (req, res) => {
     });
 
     const { storeId, apiToken, checkoutId } = getMonerisCredentials();
-
     const ticket = await monerisPreload({
       store_id: storeId,
       api_token: apiToken,
       checkout_id: checkoutId,
       txn_total: total.toFixed(2),
       cart_subtotal: subtotal.toFixed(2),
-      tax: {
-        amount: hst.toFixed(2),
-        description: 'HST',
-        rate: '13.00'
-      },
+      tax: { amount: hst.toFixed(2), description: 'HST', rate: '13.00' },
       environment: 'prod',
       action: 'preload',
       order_no: confirmationCode,
@@ -140,12 +130,7 @@ router.post('/ticket-checkout', async (req, res) => {
     });
 
     console.log(`✓ Moneris checkout created (pending payment): ${confirmationCode}, total: $${total.toFixed(2)}`);
-
-    res.json({
-      ticket,
-      confirmation_code: confirmationCode
-    });
-
+    res.json({ ticket, confirmation_code: confirmationCode });
   } catch (error) {
     console.error('Ticket checkout error:', error);
     res.status(500).json({ error: error.message });
@@ -160,7 +145,6 @@ router.post('/ticket-checkout', async (req, res) => {
 router.post('/confirm-payment', async (req, res) => {
   try {
     const { confirmation_code } = req.body;
-
     if (!confirmation_code) {
       return res.status(400).json({ error: 'Confirmation code required' });
     }
@@ -184,19 +168,28 @@ router.post('/confirm-payment', async (req, res) => {
 
     // NOW create the ticket order (after payment)
     const id = `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
     const orderResult = await pool.query(
       `INSERT INTO ticket_orders (
         id, event_id, ticket_type, quantity_adult, quantity_child,
         customer_name, customer_email, customer_phone,
-        confirmation_code, status, payment_status, total_price, bar_credits,
-        created_date, updated_date, created_by
+        confirmation_code, status, payment_status, total_price,
+        bar_credits, created_date, updated_date, created_by
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW(), 'web')
       RETURNING *`,
       [
-        id, checkoutData.eventId, 'mixed', checkoutData.quantityAdult, checkoutData.quantityChild,
-        checkoutData.customerName, checkoutData.customerEmail, checkoutData.customerPhone,
-        confirmation_code, 'confirmed', 'paid', checkoutData.total, checkoutData.barCredits
+        id,
+        checkoutData.eventId,
+        'mixed',
+        checkoutData.quantityAdult,
+        checkoutData.quantityChild,
+        checkoutData.customerName,
+        checkoutData.customerEmail,
+        checkoutData.customerPhone,
+        confirmation_code,
+        'confirmed',
+        'paid',
+        checkoutData.total,
+        checkoutData.barCredits
       ]
     );
     const ticket = orderResult.rows[0];
@@ -218,10 +211,16 @@ router.post('/confirm-payment', async (req, res) => {
         const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [checkoutData.eventId]);
         if (eventResult.rows.length > 0) event = eventResult.rows[0];
 
-        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(confirmation_code)}`;
-        const eventDate = event ? new Date(event.date).toLocaleDateString('en-CA', {
-          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-        }) : 'TBD';
+        // ✅ FIX: Generate inline base64 QR code — not a blocked external image URL
+        const qrDataUrl = await QRCode.toDataURL(confirmation_code, {
+          width: 200,
+          margin: 2,
+          color: { dark: '#000000', light: '#ffffff' }
+        });
+
+        const eventDate = event
+          ? new Date(event.date).toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+          : 'TBD';
 
         let ticketLines = [];
         if (ticket.quantity_adult > 0) ticketLines.push(`${ticket.quantity_adult}x Adult Ticket`);
@@ -232,45 +231,48 @@ router.post('/confirm-payment', async (req, res) => {
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#f5f5f4;font-family:Arial,sans-serif;">
 <div style="max-width:500px;margin:20px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
-<div style="background:#1c1917;padding:24px;text-align:center;">
-<h1 style="margin:0;color:#facc15;font-size:24px;letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
-<p style="margin:8px 0 0;color:#a8a29e;font-size:14px;">Your Ticket Confirmation</p>
-</div>
-<div style="text-align:center;padding:24px;">
-<img src="${qrUrl}" alt="QR Code" style="width:180px;height:180px;border:4px solid #1c1917;border-radius:12px;">
-<div style="margin-top:12px;font-size:24px;font-weight:bold;color:#1c1917;letter-spacing:3px;">${confirmation_code}</div>
-<p style="color:#78716c;font-size:12px;margin:4px 0 0;">Show this QR code at the gate</p>
-</div>
-<div style="padding:0 24px 20px;">
-<div style="background:#f5f5f4;border-radius:10px;padding:16px;">
-<h2 style="margin:0 0 12px;color:#1c1917;font-size:18px;">${event ? event.title : 'Holmdale Pro Rodeo'}</h2>
-<table style="width:100%;font-size:14px;color:#44403c;">
-<tr><td style="padding:4px 0;font-weight:bold;">📅 Date</td><td>${eventDate}</td></tr>
-<tr><td style="padding:4px 0;font-weight:bold;">🕐 Time</td><td>${event ? event.time : ''}</td></tr>
-<tr><td style="padding:4px 0;font-weight:bold;">📍 Venue</td><td>${event ? event.venue : 'Holmdale Rodeo Grounds'}</td></tr>
-</table>
-</div>
-</div>
-<div style="padding:0 24px 20px;">
-<div style="border-top:1px solid #e7e5e4;padding-top:16px;">
-<h3 style="margin:0 0 8px;color:#1c1917;font-size:16px;">Order Details</h3>
-<table style="width:100%;font-size:14px;color:#44403c;">
-<tr><td style="padding:4px 0;font-weight:bold;">Name</td><td>${ticket.customer_name}</td></tr>
-<tr><td style="padding:4px 0;font-weight:bold;">Tickets</td><td>${ticketSummary}</td></tr>
-<tr><td style="padding:4px 0;font-weight:bold;">Total</td><td style="font-size:18px;font-weight:bold;color:#16a34a;">$${parseFloat(ticket.total_price).toFixed(2)}</td></tr>
-</table>
-</div>
-</div>
-${ticket.bar_credits > 0 ? `<div style="padding:0 24px 20px;"><div style="background:#fef3c7;border-radius:10px;padding:12px 16px;text-align:center;"><span style="font-size:20px;">🍺</span><span style="font-weight:bold;color:#92400e;">${ticket.bar_credits} Drink Ticket(s) included</span></div></div>` : ''}
-<div style="background:#1c1917;padding:16px 24px;text-align:center;">
-<p style="margin:0;color:#a8a29e;font-size:12px;">Holmdale Rodeo Grounds — Walkerton, Ontario<br>Questions? Contact us at info@holmdalerodeo.ca</p>
-</div>
+  <div style="background:#1c1917;padding:24px;text-align:center;">
+    <h1 style="margin:0;color:#facc15;font-size:24px;letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
+    <p style="margin:8px 0 0;color:#a8a29e;font-size:14px;">Your Ticket Confirmation</p>
+  </div>
+  <div style="text-align:center;padding:24px;">
+    <img src="${qrDataUrl}" alt="QR Code" style="width:180px;height:180px;border:4px solid #1c1917;border-radius:12px;">
+    <div style="margin-top:12px;font-size:24px;font-weight:bold;color:#1c1917;letter-spacing:3px;">${confirmation_code}</div>
+    <p style="color:#78716c;font-size:12px;margin:4px 0 0;">Show this QR code at the gate</p>
+  </div>
+  <div style="padding:0 24px 20px;">
+    <div style="background:#f5f5f4;border-radius:10px;padding:16px;">
+      <h2 style="margin:0 0 12px;color:#1c1917;font-size:18px;">${event ? event.title : 'Holmdale Pro Rodeo'}</h2>
+      <table style="width:100%;font-size:14px;color:#44403c;">
+        <tr><td style="padding:4px 0;font-weight:bold;">📅 Date</td><td>${eventDate}</td></tr>
+        <tr><td style="padding:4px 0;font-weight:bold;">🕐 Time</td><td>${event ? event.time : ''}</td></tr>
+        <tr><td style="padding:4px 0;font-weight:bold;">📍 Venue</td><td>${event ? event.venue : 'Holmdale Rodeo Grounds'}</td></tr>
+      </table>
+    </div>
+  </div>
+  <div style="padding:0 24px 20px;">
+    <div style="border-top:1px solid #e7e5e4;padding-top:16px;">
+      <h3 style="margin:0 0 8px;color:#1c1917;font-size:16px;">Order Details</h3>
+      <table style="width:100%;font-size:14px;color:#44403c;">
+        <tr><td style="padding:4px 0;font-weight:bold;">Name</td><td>${ticket.customer_name}</td></tr>
+        <tr><td style="padding:4px 0;font-weight:bold;">Tickets</td><td>${ticketSummary}</td></tr>
+        <tr><td style="padding:4px 0;font-weight:bold;">Total</td><td style="font-size:18px;font-weight:bold;color:#16a34a;">$${parseFloat(ticket.total_price).toFixed(2)}</td></tr>
+      </table>
+    </div>
+  </div>
+  ${ticket.bar_credits > 0 ? `<div style="padding:0 24px 20px;"><div style="background:#fef3c7;border-radius:10px;padding:12px 16px;text-align:center;"><span style="font-size:20px;">🍺</span><span style="font-weight:bold;color:#92400e;">${ticket.bar_credits} Drink Ticket(s) included</span></div></div>` : ''}
+  <div style="background:#1c1917;padding:16px 24px;text-align:center;">
+    <p style="margin:0;color:#a8a29e;font-size:12px;">Holmdale Rodeo Grounds — Walkerton, Ontario<br>Questions? Contact us at info@holmdalerodeo.ca</p>
+  </div>
 </div>
 </body></html>`;
 
         await fetch('https://api.resend.com/emails', {
           method: 'POST',
-          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
           body: JSON.stringify({
             from,
             to: [checkoutData.customerEmail],
@@ -283,7 +285,6 @@ ${ticket.bar_credits > 0 ? `<div style="padding:0 24px 20px;"><div style="backgr
           'UPDATE ticket_orders SET payment_status = $1, updated_date = NOW() WHERE id = $2',
           ['confirmed_emailed', id]
         );
-
         console.log(`✓ Email sent for ${confirmation_code} to ${checkoutData.customerEmail}`);
       }
     } catch (emailErr) {
@@ -292,10 +293,8 @@ ${ticket.bar_credits > 0 ? `<div style="padding:0 24px 20px;"><div style="backgr
 
     // Clean up
     pendingCheckouts.delete(confirmation_code);
-
     console.log(`✓ Payment confirmed, order created: ${confirmation_code}`);
     res.json({ success: true, confirmation_code, message: 'Payment confirmed and ticket created' });
-
   } catch (error) {
     console.error('Confirm payment error:', error);
     res.status(500).json({ error: error.message });
@@ -308,7 +307,6 @@ ${ticket.bar_credits > 0 ? `<div style="padding:0 24px 20px;"><div style="backgr
 router.post('/bar-checkout', authenticateToken, async (req, res) => {
   try {
     const { rfidTagId, ticketQuantity, customerName } = req.body;
-
     if (!rfidTagId || !ticketQuantity) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
@@ -330,7 +328,6 @@ router.post('/bar-checkout', authenticateToken, async (req, res) => {
 
     const totalPrice = ticketQuantity * 0.07;
     const { storeId, apiToken, checkoutId } = getMonerisCredentials();
-
     const ticket = await monerisPreload({
       store_id: storeId,
       api_token: apiToken,
@@ -343,7 +340,6 @@ router.post('/bar-checkout', authenticateToken, async (req, res) => {
 
     console.log(`✓ Bar checkout created: ${ticketQuantity} tickets, $${totalPrice.toFixed(2)}`);
     res.json({ ticket, totalPrice });
-
   } catch (error) {
     console.error('Bar checkout error:', error);
     res.status(500).json({ error: error.message });
@@ -356,7 +352,6 @@ router.post('/bar-checkout', authenticateToken, async (req, res) => {
 router.post('/merch-checkout', authenticateToken, async (req, res) => {
   try {
     const { items, customerEmail, customerName, shippingAddress } = req.body;
-
     if (!items || items.length === 0 || !customerEmail || !customerName) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
@@ -368,8 +363,8 @@ router.post('/merch-checkout', authenticateToken, async (req, res) => {
     const hst = subtotal * 0.13;
     const total = subtotal + hst;
     const orderId = `MERCH-${Date.now()}`;
-    const { storeId, apiToken, checkoutId } = getMonerisCredentials();
 
+    const { storeId, apiToken, checkoutId } = getMonerisCredentials();
     const ticket = await monerisPreload({
       store_id: storeId,
       api_token: apiToken,
@@ -390,7 +385,6 @@ router.post('/merch-checkout', authenticateToken, async (req, res) => {
 
     console.log(`✓ Merch checkout created: ${orderId}, $${total.toFixed(2)}`);
     res.json({ ticket, order_id: orderId, total: total.toFixed(2) });
-
   } catch (error) {
     console.error('Merchandise checkout error:', error);
     res.status(500).json({ error: error.message });
@@ -403,7 +397,6 @@ router.post('/merch-checkout', authenticateToken, async (req, res) => {
 router.post('/refund', authenticateToken, async (req, res) => {
   try {
     const { ticketOrderId, amount, reason } = req.body;
-
     if (!ticketOrderId) {
       return res.status(400).json({ error: 'Ticket order ID required' });
     }
@@ -421,7 +414,6 @@ router.post('/refund', authenticateToken, async (req, res) => {
 
     console.log(`✓ Ticket ${order.confirmation_code} refunded. Reason: ${reason || 'none'}`);
     res.json({ success: true, message: 'Ticket order refunded', confirmation_code: order.confirmation_code });
-
   } catch (error) {
     console.error('Refund error:', error);
     res.status(500).json({ error: error.message });
@@ -452,7 +444,7 @@ router.post('/webhook', async (req, res) => {
 
       if (existing.rows.length > 0) {
         await pool.query(
-          `UPDATE ticket_orders SET status = 'confirmed', payment_status = 'paid', updated_date = NOW() 
+          `UPDATE ticket_orders SET status = 'confirmed', payment_status = 'paid', updated_date = NOW()
            WHERE confirmation_code = $1 AND status != 'confirmed'`,
           [orderNo]
         );
@@ -470,9 +462,18 @@ router.post('/webhook', async (req, res) => {
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW(), 'webhook')
             RETURNING *`,
             [
-              id, checkoutData.eventId, 'mixed', checkoutData.quantityAdult, checkoutData.quantityChild,
-              checkoutData.customerName, checkoutData.customerEmail, checkoutData.customerPhone,
-              orderNo, 'confirmed', 'paid', checkoutData.total
+              id,
+              checkoutData.eventId,
+              'mixed',
+              checkoutData.quantityAdult,
+              checkoutData.quantityChild,
+              checkoutData.customerName,
+              checkoutData.customerEmail,
+              checkoutData.customerPhone,
+              orderNo,
+              'confirmed',
+              'paid',
+              checkoutData.total
             ]
           );
 
@@ -494,12 +495,12 @@ router.post('/webhook', async (req, res) => {
     }
 
     res.json({ received: true });
-
   } catch (error) {
     console.error('Webhook error:', error);
     res.status(500).json({ error: error.message });
   }
 });
+
 // =============================================
 // POST /api/moneris/terminal-purchase
 // Pushes a purchase to the PAX A920 via
@@ -508,24 +509,21 @@ router.post('/webhook', async (req, res) => {
 router.post('/terminal-purchase', async (req, res) => {
   try {
     const { totalAmount, order_id } = req.body;
-
     if (!totalAmount || !order_id) {
       return res.status(400).json({ error: 'totalAmount and order_id are required' });
     }
 
-    const storeId    = process.env.MONERIS_STORE_ID;
-    const apiToken   = process.env.MONERIS_API_TOKEN;
+    const storeId = process.env.MONERIS_STORE_ID;
+    const apiToken = process.env.MONERIS_API_TOKEN;
     const terminalId = process.env.MONERIS_TERMINAL_ID;
 
     if (!storeId || !apiToken || !terminalId) {
       return res.status(500).json({ error: 'Moneris terminal credentials not configured' });
     }
 
-    // Convert cents string to dollar amount string (e.g. "3390" -> "33.90")
     const amountCents = parseInt(totalAmount, 10);
     const amountDollars = (amountCents / 100).toFixed(2);
 
-    // Build Moneris Cloud IPgate XML request
     const xmlBody = `<?xml version="1.0" encoding="UTF-8"?>
 <request>
   <store_id>${storeId}</store_id>
@@ -545,22 +543,21 @@ router.post('/terminal-purchase', async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type': 'text/xml; charset=UTF-8' },
       body: xmlBody,
-      signal: AbortSignal.timeout(60000) // 60s timeout for customer to tap card
+      signal: AbortSignal.timeout(60000)
     });
 
     const xmlText = await monerisResp.text();
     console.log('[Moneris] Raw response:', xmlText);
 
-    // Parse key fields from XML response
     const get = (tag) => {
       const m = xmlText.match(new RegExp(`<${tag}>([^<]*)<\/${tag}>`));
       return m ? m[1].trim() : null;
     };
 
     const responseCode = get('response_code');
-    const message      = get('message') || get('Message');
-    const txnNum       = get('txn_num') || get('transaction_no');
-    const approved     = responseCode && parseInt(responseCode, 10) < 50;
+    const message = get('message') || get('Message');
+    const txnNum = get('txn_num') || get('transaction_no');
+    const approved = responseCode && parseInt(responseCode, 10) < 50;
 
     if (approved) {
       console.log(`[Moneris] Approved: ${responseCode} - ${message}`);
@@ -577,13 +574,16 @@ router.post('/terminal-purchase', async (req, res) => {
       return res.status(402).json({
         error: message || 'Transaction declined',
         response_code: responseCode,
-        receipt: { ResponseCode: parseInt(responseCode || '99', 10), Message: message }
+        receipt: {
+          ResponseCode: parseInt(responseCode || '99', 10),
+          Message: message
+        }
       });
     }
-
   } catch (error) {
     console.error('[Moneris] Terminal purchase error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
+
 module.exports = router;

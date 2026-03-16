@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const QRCode = require('qrcode'); // ← ADD THIS to package.json: npm install qrcode
 
 // ============================================
 // EMAIL ROUTES — Ticket confirmations via Resend
@@ -28,7 +29,6 @@ async function sendEmail({ to, subject, html }) {
   });
 
   const data = await response.json();
-
   if (!response.ok) {
     console.error('✗ Resend error:', data);
     throw new Error(data.message || 'Email send failed');
@@ -38,16 +38,22 @@ async function sendEmail({ to, subject, html }) {
   return data;
 }
 
-function generateQRCodeUrl(text) {
-  // Use Google Charts API for QR code generation
-  return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(text)}`;
+// ✅ FIX: Generate inline base64 QR code — works in all email clients
+async function generateQRCodeDataUrl(text) {
+  return await QRCode.toDataURL(text, {
+    width: 200,
+    margin: 2,
+    color: { dark: '#000000', light: '#ffffff' }
+  });
 }
 
-function buildTicketEmailHtml(ticket, event) {
-  const qrUrl = generateQRCodeUrl(ticket.confirmation_code);
-  const eventDate = event ? new Date(event.date).toLocaleDateString('en-CA', { 
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
-  }) : 'TBD';
+// ✅ FIX: Now async because QR generation is async
+async function buildTicketEmailHtml(ticket, event) {
+  const qrDataUrl = await generateQRCodeDataUrl(ticket.confirmation_code);
+
+  const eventDate = event
+    ? new Date(event.date).toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+    : 'TBD';
   const eventTime = event ? event.time : '';
   const eventTitle = event ? event.title : 'Holmdale Pro Rodeo';
   const venue = event ? event.venue : 'Holmdale Rodeo Grounds';
@@ -70,67 +76,60 @@ function buildTicketEmailHtml(ticket, event) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body style="margin:0; padding:0; background:#f5f5f4; font-family: Arial, sans-serif;">
-  <div style="max-width:500px; margin:20px auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-    
-    <!-- Header -->
-    <div style="background:#1c1917; padding:24px; text-align:center;">
-      <h1 style="margin:0; color:#facc15; font-size:24px; letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
-      <p style="margin:8px 0 0; color:#a8a29e; font-size:14px;">Your Ticket Confirmation</p>
-    </div>
-
-    <!-- QR Code -->
-    <div style="text-align:center; padding:24px;">
-      <img src="${qrUrl}" alt="QR Code" style="width:180px; height:180px; border:4px solid #1c1917; border-radius:12px;">
-      <div style="margin-top:12px; font-size:24px; font-weight:bold; color:#1c1917; letter-spacing:3px;">
-        ${ticket.confirmation_code}
-      </div>
-      <p style="color:#78716c; font-size:12px; margin:4px 0 0;">Show this QR code at the gate</p>
-    </div>
-
-    <!-- Event Details -->
-    <div style="padding:0 24px 20px;">
-      <div style="background:#f5f5f4; border-radius:10px; padding:16px;">
-        <h2 style="margin:0 0 12px; color:#1c1917; font-size:18px;">${eventTitle}</h2>
-        <table style="width:100%; font-size:14px; color:#44403c;">
-          <tr><td style="padding:4px 0; font-weight:bold;">📅 Date</td><td>${eventDate}</td></tr>
-          <tr><td style="padding:4px 0; font-weight:bold;">🕐 Time</td><td>${eventTime}</td></tr>
-          <tr><td style="padding:4px 0; font-weight:bold;">📍 Venue</td><td>${venue}</td></tr>
-        </table>
-      </div>
-    </div>
-
-    <!-- Order Details -->
-    <div style="padding:0 24px 20px;">
-      <div style="border-top:1px solid #e7e5e4; padding-top:16px;">
-        <h3 style="margin:0 0 8px; color:#1c1917; font-size:16px;">Order Details</h3>
-        <table style="width:100%; font-size:14px; color:#44403c;">
-          <tr><td style="padding:4px 0; font-weight:bold;">Name</td><td>${ticket.customer_name}</td></tr>
-          <tr><td style="padding:4px 0; font-weight:bold;">Tickets</td><td>${ticketSummary}</td></tr>
-          <tr><td style="padding:4px 0; font-weight:bold;">Total</td><td style="font-size:18px; font-weight:bold; color:#16a34a;">$${parseFloat(ticket.total_price).toFixed(2)}</td></tr>
-        </table>
-      </div>
-    </div>
-
-    ${ticket.bar_credits > 0 ? `
-    <!-- Bar Credits -->
-    <div style="padding:0 24px 20px;">
-      <div style="background:#fef3c7; border-radius:10px; padding:12px 16px; text-align:center;">
-        <span style="font-size:20px;">🍺</span>
-        <span style="font-weight:bold; color:#92400e;">${ticket.bar_credits} Drink Ticket(s) included</span>
-        <p style="margin:4px 0 0; font-size:12px; color:#92400e;">Loaded to your wristband at the gate</p>
-      </div>
-    </div>
-    ` : ''}
-
-    <!-- Footer -->
-    <div style="background:#1c1917; padding:16px 24px; text-align:center;">
-      <p style="margin:0; color:#a8a29e; font-size:12px;">
-        Holmdale Rodeo Grounds — Walkerton, Ontario<br>
-        Questions? Contact us at info@holmdalerodeo.ca
-      </p>
-    </div>
-
+<div style="max-width:500px; margin:20px auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+  <!-- Header -->
+  <div style="background:#1c1917; padding:24px; text-align:center;">
+    <h1 style="margin:0; color:#facc15; font-size:24px; letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
+    <p style="margin:8px 0 0; color:#a8a29e; font-size:14px;">Your Ticket Confirmation</p>
   </div>
+  <!-- QR Code -->
+  <div style="text-align:center; padding:24px;">
+    <img src="${qrDataUrl}" alt="QR Code" style="width:180px; height:180px; border:4px solid #1c1917; border-radius:12px;">
+    <div style="margin-top:12px; font-size:24px; font-weight:bold; color:#1c1917; letter-spacing:3px;">
+      ${ticket.confirmation_code}
+    </div>
+    <p style="color:#78716c; font-size:12px; margin:4px 0 0;">Show this QR code at the gate</p>
+  </div>
+  <!-- Event Details -->
+  <div style="padding:0 24px 20px;">
+    <div style="background:#f5f5f4; border-radius:10px; padding:16px;">
+      <h2 style="margin:0 0 12px; color:#1c1917; font-size:18px;">${eventTitle}</h2>
+      <table style="width:100%; font-size:14px; color:#44403c;">
+        <tr><td style="padding:4px 0; font-weight:bold;">📅 Date</td><td>${eventDate}</td></tr>
+        <tr><td style="padding:4px 0; font-weight:bold;">🕐 Time</td><td>${eventTime}</td></tr>
+        <tr><td style="padding:4px 0; font-weight:bold;">📍 Venue</td><td>${venue}</td></tr>
+      </table>
+    </div>
+  </div>
+  <!-- Order Details -->
+  <div style="padding:0 24px 20px;">
+    <div style="border-top:1px solid #e7e5e4; padding-top:16px;">
+      <h3 style="margin:0 0 8px; color:#1c1917; font-size:16px;">Order Details</h3>
+      <table style="width:100%; font-size:14px; color:#44403c;">
+        <tr><td style="padding:4px 0; font-weight:bold;">Name</td><td>${ticket.customer_name}</td></tr>
+        <tr><td style="padding:4px 0; font-weight:bold;">Tickets</td><td>${ticketSummary}</td></tr>
+        <tr><td style="padding:4px 0; font-weight:bold;">Total</td><td style="font-size:18px; font-weight:bold; color:#16a34a;">$${parseFloat(ticket.total_price).toFixed(2)}</td></tr>
+      </table>
+    </div>
+  </div>
+  ${ticket.bar_credits > 0 ? `
+  <!-- Bar Credits -->
+  <div style="padding:0 24px 20px;">
+    <div style="background:#fef3c7; border-radius:10px; padding:12px 16px; text-align:center;">
+      <span style="font-size:20px;">🍺</span>
+      <span style="font-weight:bold; color:#92400e;">${ticket.bar_credits} Drink Ticket(s) included</span>
+      <p style="margin:4px 0 0; font-size:12px; color:#92400e;">Loaded to your wristband at the gate</p>
+    </div>
+  </div>
+  ` : ''}
+  <!-- Footer -->
+  <div style="background:#1c1917; padding:16px 24px; text-align:center;">
+    <p style="margin:0; color:#a8a29e; font-size:12px;">
+      Holmdale Rodeo Grounds — Walkerton, Ontario<br>
+      Questions? Contact us at info@holmdalerodeo.ca
+    </p>
+  </div>
+</div>
 </body>
 </html>`;
 }
@@ -150,60 +149,51 @@ router.post('/ticket-confirmation', async (req, res) => {
 
     console.log(`[Email] Processing confirmation for: ${code}`);
 
-    // Look up the ticket order
-    let ticket;
     const result = await pool.query(
       'SELECT * FROM ticket_orders WHERE confirmation_code = $1 OR id = $2',
       [code, code]
     );
-
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Ticket order not found' });
     }
 
-    ticket = result.rows[0];
-
+    const ticket = result.rows[0];
     if (!ticket.customer_email) {
       console.log(`[Email] No email address for order ${code}`);
       return res.status(400).json({ error: 'No customer email on order' });
     }
 
-    // Update payment status to confirmed
     await pool.query(
       'UPDATE ticket_orders SET payment_status = $1, updated_date = NOW() WHERE id = $2',
       ['confirmed', ticket.id]
     );
 
-    // Look up event details
     let event = null;
     if (ticket.event_id) {
       const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [ticket.event_id]);
       if (eventResult.rows.length > 0) event = eventResult.rows[0];
     }
 
-    // Build and send email
-    const html = buildTicketEmailHtml(ticket, event);
+    // ✅ FIX: await the now-async buildTicketEmailHtml
+    const html = await buildTicketEmailHtml(ticket, event);
     await sendEmail({
       to: ticket.customer_email,
       subject: `🎟 Your Holmdale Pro Rodeo Tickets — ${ticket.confirmation_code}`,
       html
     });
 
-    // Update ticket to note email was sent
     await pool.query(
       'UPDATE ticket_orders SET payment_status = $1, updated_date = NOW() WHERE id = $2',
       ['confirmed_emailed', ticket.id]
     );
 
     console.log(`✓ Confirmation email sent for ${ticket.confirmation_code} to ${ticket.customer_email}`);
-
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: 'Confirmation email sent',
       confirmation_code: ticket.confirmation_code,
       email: ticket.customer_email
     });
-
   } catch (error) {
     console.error('✗ Email error:', error);
     res.status(500).json({ error: error.message });
@@ -215,7 +205,6 @@ router.post('/ticket-confirmation', async (req, res) => {
 // Alternative endpoint name (same logic)
 // ============================================
 router.post('/send-confirmation', async (req, res) => {
-  // Forward to ticket-confirmation handler
   req.url = '/ticket-confirmation';
   router.handle(req, res);
 });
@@ -227,7 +216,6 @@ router.post('/send-confirmation', async (req, res) => {
 router.post('/resend-ticket', async (req, res) => {
   try {
     const { confirmation_code, email } = req.body;
-
     if (!confirmation_code) {
       return res.status(400).json({ error: 'Confirmation code required' });
     }
@@ -236,14 +224,12 @@ router.post('/resend-ticket', async (req, res) => {
       'SELECT * FROM ticket_orders WHERE confirmation_code = $1',
       [confirmation_code]
     );
-
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Order not found' });
     }
 
     const ticket = result.rows[0];
     const sendTo = email || ticket.customer_email;
-
     if (!sendTo) {
       return res.status(400).json({ error: 'No email address' });
     }
@@ -254,7 +240,8 @@ router.post('/resend-ticket', async (req, res) => {
       if (eventResult.rows.length > 0) event = eventResult.rows[0];
     }
 
-    const html = buildTicketEmailHtml(ticket, event);
+    // ✅ FIX: await the now-async buildTicketEmailHtml
+    const html = await buildTicketEmailHtml(ticket, event);
     await sendEmail({
       to: sendTo,
       subject: `🎟 Your Holmdale Pro Rodeo Tickets — ${ticket.confirmation_code}`,
@@ -263,7 +250,6 @@ router.post('/resend-ticket', async (req, res) => {
 
     console.log(`✓ Resent confirmation for ${ticket.confirmation_code} to ${sendTo}`);
     res.json({ success: true, message: `Email resent to ${sendTo}` });
-
   } catch (error) {
     console.error('✗ Resend error:', error);
     res.status(500).json({ error: error.message });
@@ -278,19 +264,18 @@ router.post('/test', async (req, res) => {
   try {
     const { to } = req.body;
     const testTo = to || 'darren@holmgraphics.ca';
-
     await sendEmail({
       to: testTo,
       subject: '🤠 Holmdale Rodeo — Email Test',
       html: '<h1>Email is working!</h1><p>Your Resend integration is configured correctly.</p>'
     });
-
     res.json({ success: true, message: `Test email sent to ${testTo}` });
   } catch (error) {
     console.error('✗ Test email error:', error);
     res.status(500).json({ error: error.message });
   }
 });
+
 // ============================================
 // POST /api/email/vendor-invite
 // Send vendor registration form link by email
@@ -298,7 +283,6 @@ router.post('/test', async (req, res) => {
 router.post('/vendor-invite', authenticateToken, async (req, res) => {
   try {
     const { to, vendor_name, personal_message } = req.body;
-
     if (!to) {
       return res.status(400).json({ error: 'Email address required' });
     }
@@ -313,42 +297,42 @@ router.post('/vendor-invite', authenticateToken, async (req, res) => {
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#f5f5f4;font-family:Arial,sans-serif;">
 <div style="max-width:500px;margin:20px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
-<div style="background:#1c1917;padding:24px;text-align:center;">
-<h1 style="margin:0;color:#facc15;font-size:24px;letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
-<p style="margin:8px 0 0;color:#a8a29e;font-size:14px;">Vendor Registration Invitation</p>
-</div>
-<div style="padding:24px;">
-<p style="color:#44403c;font-size:14px;line-height:1.6;">${greeting}</p>
-<p style="color:#44403c;font-size:14px;line-height:1.6;">You're invited to register as a vendor for the <strong>Holmdale Pro Rodeo</strong>! We'd love to have you join us for an exciting weekend of rodeo action and great crowds.</p>
-${personalNote}
-<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin:20px 0;text-align:center;">
-<p style="margin:0 0 4px;color:#166534;font-weight:bold;font-size:16px;">📅 July 31 - August 2, 2026</p>
-<p style="margin:0;color:#166534;font-size:14px;">📍 588 Sideroad 10 S., Walkerton, ON</p>
-</div>
-<div style="text-align:center;margin:24px 0;">
-<a href="${regUrl}" style="display:inline-block;padding:16px 40px;background:#00B74A;color:white;font-size:18px;font-weight:bold;text-decoration:none;border-radius:10px;">Register Now</a>
-</div>
-<p style="color:#78716c;font-size:13px;line-height:1.6;">Click the button above to fill out the registration form. You'll be able to select your booth size and vendor type. Booth pricing details will follow.</p>
-<p style="color:#78716c;font-size:13px;">Or copy this link: <a href="${regUrl}" style="color:#00B74A;">${regUrl}</a></p>
-</div>
-<div style="background:#1c1917;padding:16px 24px;text-align:center;">
-<p style="margin:0;color:#a8a29e;font-size:12px;">Holmdale Rodeo Grounds — Walkerton, Ontario<br>Questions? Contact us at info@holmdalerodeo.ca</p>
-</div>
+  <div style="background:#1c1917;padding:24px;text-align:center;">
+    <h1 style="margin:0;color:#facc15;font-size:24px;letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
+    <p style="margin:8px 0 0;color:#a8a29e;font-size:14px;">Vendor Registration Invitation</p>
+  </div>
+  <div style="padding:24px;">
+    <p style="color:#44403c;font-size:14px;line-height:1.6;">${greeting}</p>
+    <p style="color:#44403c;font-size:14px;line-height:1.6;">You're invited to register as a vendor for the <strong>Holmdale Pro Rodeo</strong>! We'd love to have you join us for an exciting weekend of rodeo action and great crowds.</p>
+    ${personalNote}
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin:20px 0;text-align:center;">
+      <p style="margin:0 0 4px;color:#166534;font-weight:bold;font-size:16px;">📅 July 31 - August 2, 2026</p>
+      <p style="margin:0;color:#166534;font-size:14px;">📍 588 Sideroad 10 S., Walkerton, ON</p>
+    </div>
+    <div style="text-align:center;margin:24px 0;">
+      <a href="${regUrl}" style="display:inline-block;padding:16px 40px;background:#00B74A;color:white;font-size:18px;font-weight:bold;text-decoration:none;border-radius:10px;">Register Now</a>
+    </div>
+    <p style="color:#78716c;font-size:13px;line-height:1.6;">Click the button above to fill out the registration form. You'll be able to select your booth size and vendor type. Booth pricing details will follow.</p>
+    <p style="color:#78716c;font-size:13px;">Or copy this link: <a href="${regUrl}" style="color:#00B74A;">${regUrl}</a></p>
+  </div>
+  <div style="background:#1c1917;padding:16px 24px;text-align:center;">
+    <p style="margin:0;color:#a8a29e;font-size:12px;">Holmdale Rodeo Grounds — Walkerton, Ontario<br>Questions? Contact us at info@holmdalerodeo.ca</p>
+  </div>
 </div>
 </body></html>`;
 
     await sendEmail({
-      to: to,
+      to,
       subject: '🤠 You\'re Invited — Vendor Registration for Holmdale Pro Rodeo',
       html
     });
 
     console.log(`✓ Vendor invite sent to ${to}`);
     res.json({ success: true, message: `Invitation sent to ${to}` });
-
   } catch (error) {
     console.error('Vendor invite error:', error);
     res.status(500).json({ error: error.message });
   }
 });
+
 module.exports = router;

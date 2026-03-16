@@ -33,7 +33,7 @@ module.exports = function(pool) {
         customer_name: w.customer_name,
         credits: w.credits || 0,
         credits_spent: w.credits_spent || 0,
-        remaining: Math.max(0, (w.credits || 0) - (w.credits_spent || 0)),
+        remaining: Math.max(0, parseFloat(w.credits) || 0),
         alcohol_approved: w.alcohol_approved || false,
         registered: w.created_date
       });

@@ -256,5 +256,26 @@ router.get('/', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch wristbands' });
   }
 });
+// POST cancel/refund a drink (Bar)
+router.post('/cancel-drink', authenticateToken, async (req, res) => {
+  try {
+    const { rfid_uid } = req.body;
+    if (!rfid_uid) return res.status(400).json({ error: 'Missing rfid_uid' });
 
+    const result = await pool.query(
+      `UPDATE wristbands 
+       SET credits = credits + 7,
+           credits_spent = GREATEST(0, credits_spent - 7)
+       WHERE rfid_uid = $1 RETURNING *`,
+      [rfid_uid]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Wristband not found' });
+
+    console.log(`✓ Drink cancelled: ${rfid_uid} +$7`);
+    res.json({ success: true, wristband: result.rows[0] });
+  } catch (error) {
+    console.error('Error cancelling drink:', error);
+    res.status(500).json({ error: 'Failed to cancel drink' });
+  }
+});
 module.exports = router;

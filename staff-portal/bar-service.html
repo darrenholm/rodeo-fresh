@@ -396,7 +396,7 @@
                 ageStatus.innerHTML = '<span class="status-badge status-denied">✗ NOT VERIFIED</span>';
             }
 
-            const balance = parseFloat(band.credits || 0);
+            const balance = Math.max(0, parseFloat(band.credits || 0) - parseFloat(band.credits_spent || 0));
             const ticketCount = Math.floor(balance / 7);
             document.getElementById('balanceAmount').textContent = ticketCount + (ticketCount === 1 ? ' Ticket' : ' Tickets');
 

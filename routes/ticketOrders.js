@@ -232,9 +232,15 @@ router.post('/:id/verify-age', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to verify age', details: error.message });
   }
 });
+
 // DELETE ticket order (admin only)
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
+    // Unlink any wristbands first to avoid foreign key constraint
+    await pool.query(
+      'UPDATE wristbands SET ticket_order_id = NULL WHERE ticket_order_id = $1',
+      [req.params.id]
+    );
     const result = await pool.query(
       'DELETE FROM ticket_orders WHERE id = $1 RETURNING id',
       [req.params.id]
@@ -247,4 +253,5 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to delete ticket order' });
   }
 });
+
 module.exports = router;

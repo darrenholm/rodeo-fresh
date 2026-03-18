@@ -232,5 +232,19 @@ router.post('/:id/verify-age', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to verify age', details: error.message });
   }
 });
-
+// DELETE ticket order (admin only)
+router.delete('/:id', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM ticket_orders WHERE id = $1 RETURNING id',
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Order not found' });
+    console.log(`✓ Deleted ticket order: ${req.params.id}`);
+    res.json({ success: true, id: result.rows[0].id });
+  } catch (error) {
+    console.error('Error deleting ticket order:', error);
+    res.status(500).json({ error: 'Failed to delete ticket order' });
+  }
+});
 module.exports = router;

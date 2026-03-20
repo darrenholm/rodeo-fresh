@@ -117,7 +117,7 @@ app.use('/api/shifts-manage', shiftRoutes);
 app.use('/api/shifts-crud', shiftsCrudRoutes);
 
 // Payments
-app.use('/api/moneris', monerisRoutes);
+app.use('/api/moneris', monerisRoutes); app.use('/api/stripe', stripeRoutes);
 
 // Email & Reports
 app.use('/api/email', emailRoutes);

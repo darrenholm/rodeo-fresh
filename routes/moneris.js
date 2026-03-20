@@ -586,4 +586,51 @@ router.post('/terminal-purchase', async (req, res) => {
   }
 });
 
+// POST /api/moneris/terminal-callback
+// Moneris Cloud IPgate posts the transaction result here
+router.post('/terminal-callback', async (req, res) => {
+  try {
+    console.log('[Moneris Terminal Callback]', JSON.stringify(req.body));
+    const data = req.body;
+
+    // Must respond 200 immediately
+    res.status(200).json({ received: true });
+
+    // Check if transaction was approved
+    const responseCode = data?.response?.response_code || data?.responseCode || '';
+    const approved = responseCode === '00' || responseCode === '000' || data?.response?.success === true;
+
+    if (!approved) {
+      console.log('[Terminal] Payment not approved, code:', responseCode);
+      return;
+    }
+
+    // Extract order info from order_id (format: RODEO-timestamp-uid-qty)
+    const orderId = data?.response?.order_id || data?.orderId || '';
+    console.log('[Terminal] Payment approved! Order:', orderId);
+
+    // Parse rfid_uid and tickets from order_id if embedded
+    // Order ID format: RODEO-{timestamp}-{rfid_uid}-{tickets}
+    const parts = orderId.split('-');
+    if (parts.length >= 4) {
+      const rfidUid = parts[2];
+      const tickets = parseInt(parts[3]);
+      const amount = tickets * 7;
+
+      if (rfidUid && tickets > 0) {
+        // Add credits to wristband
+        const pool = require('../config/database');
+        await pool.query(
+          'UPDATE wristbands SET credits = credits + $1 WHERE UPPER(rfid_uid) = $2',
+          [amount, rfidUid.toUpperCase()]
+        );
+        console.log(`✓ Terminal: Added ${tickets} tickets ($${amount}) to wristband ${rfidUid}`);
+      }
+    }
+  } catch (error) {
+    console.error('[Terminal Callback] Error:', error);
+    res.status(200).json({ received: true }); // Always return 200 to Moneris
+  }
+});
+
 module.exports = router;

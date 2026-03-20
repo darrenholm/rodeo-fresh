@@ -30,7 +30,7 @@ const shiftRoutes = require('./routes/shift-routes');
 const shiftsCrudRoutes = require('./routes/shifts-crud-routes');
 
 // Payments
-const monerisRoutes = require('./routes/moneris');
+const monerisRoutes = require('./routes/moneris'); const stripeRoutes = require('./routes/stripe');
 
 // Email & Reports
 const emailRoutes = require('./routes/email');

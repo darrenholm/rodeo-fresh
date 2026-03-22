@@ -46,7 +46,8 @@ const kitchenRoutes = require('./routes/kitchenOrders')(pool);
 const merchRoutes = require('./routes/merchSales')(pool);
 
 // NEW: Wristband Transfer & Balance
-const wristbandTransferRoutes = require('./routes/wristbandTransfer')(pool);const featureRoutes = require('./routes/features');
+const wristbandTransferRoutes = require('./routes/wristbandTransfer')(pool);
+const featureRoutes = require('./routes/features');
 
 const app = express();
 
@@ -135,7 +136,8 @@ app.use('/api/merch', merchRoutes);
 app.use('/api', sponsorsVendorsRoutes);
 
 // NEW: Wristband Transfer & Balance (public balance check + transfer)
-app.use('/api/wristbands', wristbandTransferRoutes);app.use('/api/features', featureRoutes);
+app.use('/api/wristbands', wristbandTransferRoutes);
+app.use('/api/features', featureRoutes);
 
 
 // ============================================

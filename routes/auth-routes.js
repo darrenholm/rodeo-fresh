@@ -11,7 +11,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'rodeo2026secret';
 // ── Resend email helper ──
 const RESEND_API_URL = 'https://api.resend.com/emails';
 async function sendEmail({ to, subject, html }) {
-  const apiKey = process.env.RESEND_API_KEY;
+  const apiKey = process.env.RESEND_API_KEY;h
   if (!apiKey) {
     console.error('X RESEND_API_KEY not set');
     throw new Error('Email service not configured');
@@ -71,7 +71,7 @@ router.post('/staff-login', async (req, res) => {
     } catch (e) { /* column may not exist yet, ignore */ }
 
     const token = jwt.sign(
-      { id: staff.id, email: staff.email, name: staff.fullname },
+      { id: staff.id, email: staff.email, name: staff.fullname, roles: staff.roles || ['staff'] },
       JWT_SECRET,
       { expiresIn: '7d' }
     );

@@ -29,8 +29,8 @@ router.post('/create-payment-intent', async (req, res) => {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: parseInt(amount), // in cents
       currency: 'cad',
-      payment_method_types: ['card_present'],
-      capture_method: 'automatic',
+      payment_method_types: ['card_present', 'interac_present'],
+      capture_method: 'manual',
       metadata: {
         rfid_uid: rfid_uid || '',
         tickets: tickets || 0,
@@ -58,6 +58,10 @@ router.post('/capture-payment', async (req, res) => {
 
     // Retrieve to get metadata
     const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
+
+    // Capture the payment
+    await stripe.paymentIntents.capture(payment_intent_id);
+
     const rfidUid = paymentIntent.metadata?.rfid_uid;
     const tickets = parseInt(paymentIntent.metadata?.tickets || 0);
     const amount = tickets * 7;

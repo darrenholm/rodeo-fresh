@@ -1,180 +1,236 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import { useQuery } from '@tanstack/react-query';
-import { functions } from '@/api/railwayClient';
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Calendar, Clock, MapPin, ArrowRight, Ticket } from 'lucide-react';
-import { format } from 'date-fns';
-import { Link } from 'react-router-dom';
-import { createPageUrl } from '@/utils';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Feature Flags - Holmdale Pro Rodeo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #00B74A 0%, #2A2A2A 100%);
+      min-height: 100vh; padding: 20px;
+      display: flex; align-items: flex-start; justify-content: center;
+    }
+    .container { max-width: 700px; width: 100%; padding-top: 20px; }
+    .header {
+      background: white; padding: 24px 30px; border-radius: 15px;
+      margin-bottom: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); text-align: center;
+    }
+    .header h1 { color: #00B74A; font-size: 28px; font-weight: bold; margin-bottom: 6px; }
+    .header p { color: #666; font-size: 15px; }
+    .back-link {
+      display: inline-block; margin-bottom: 16px; color: white;
+      text-decoration: none; font-size: 14px; opacity: 0.85;
+    }
+    .back-link:hover { opacity: 1; }
+    .login-card {
+      background: white; border-radius: 15px; padding: 30px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2); margin-bottom: 20px;
+    }
+    .login-card h2 { color: #333; font-size: 18px; margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; color: #555; margin-bottom: 5px; }
+    .form-group input {
+      width: 100%; padding: 10px 14px; border: 1px solid #ddd;
+      border-radius: 8px; font-size: 14px; outline: none;
+    }
+    .form-group input:focus { border-color: #00B74A; }
+    .btn-login {
+      width: 100%; padding: 12px; background: #00B74A; color: white;
+      border: none; border-radius: 8px; font-size: 15px; font-weight: bold;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .btn-login:hover { background: #009d3f; }
+    .flags-card {
+      background: white; border-radius: 15px; padding: 24px 28px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2); display: none;
+    }
+    .flags-card h2 { color: #333; font-size: 20px; margin-bottom: 6px; }
+    .flags-card .subtitle { color: #888; font-size: 13px; margin-bottom: 22px; }
+    .flag-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 0; border-bottom: 1px solid #f0f0f0;
+    }
+    .flag-row:last-child { border-bottom: none; }
+    .flag-info .flag-label { font-size: 15px; font-weight: 600; color: #222; }
+    .flag-info .flag-desc { font-size: 12px; color: #888; margin-top: 3px; }
+    .flag-info .flag-meta { font-size: 11px; color: #bbb; margin-top: 3px; }
+    .toggle-wrap { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .badge {
+      font-size: 11px; font-weight: 600; padding: 3px 10px;
+      border-radius: 20px; min-width: 52px; text-align: center;
+    }
+    .badge.on { background: #d1fae5; color: #065f46; }
+    .badge.off { background: #f3f4f6; color: #6b7280; }
+    .toggle {
+      position: relative; width: 48px; height: 26px;
+      cursor: pointer; flex-shrink: 0;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; inset: 0; background: #ccc;
+      border-radius: 26px; transition: background 0.2s;
+    }
+    .slider:before {
+      content: ''; position: absolute; height: 20px; width: 20px;
+      left: 3px; bottom: 3px; background: white;
+      border-radius: 50%; transition: transform 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    input:checked + .slider { background: #00B74A; }
+    input:checked + .slider:before { transform: translateX(22px); }
+    .toggle.saving { opacity: 0.5; pointer-events: none; }
+    .toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: #1a1a1a; color: white; padding: 12px 20px;
+      border-radius: 10px; font-size: 14px; opacity: 0;
+      transition: opacity 0.3s; pointer-events: none; z-index: 999;
+    }
+    .toast.show { opacity: 1; }
+    .error-msg { color: #dc2626; font-size: 13px; margin-top: 10px; text-align: center; }
+    .loading { text-align: center; color: #888; padding: 30px; font-size: 14px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <a href="index.html" class="back-link">← Back to Staff Portal</a>
 
-export default function Events() {
-    const { data: events = [], isLoading, error } = useQuery({
-        queryKey: ['events'],
-        queryFn: async () => {
-            try {
-                const result = await functions.invoke('getEventsFromRailway');
-                console.log('Events fetched:', result);
-                return result.data || [];
-            } catch (error) {
-                console.error('Failed to fetch events:', error);
-                return [];
-            }
-        },
-        retry: 1,
-        staleTime: 5 * 60 * 1000,
-        refetchOnWindowFocus: false
-    });
+  <div class="header">
+    <h1>🚩 Feature Flags</h1>
+    <p>Control which public features are visible on holmdalerodeo.ca</p>
+  </div>
 
-    return (
-        <div className="min-h-screen bg-stone-950 pt-24 pb-20 px-6">
-            <div className="max-w-7xl mx-auto">
-                <div className="text-center mb-16">
-                    <motion.span
-                        className="inline-block text-green-500 text-sm font-semibold tracking-wider uppercase mb-4"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                    >
-                        Plan Your Visit
-                    </motion.span>
-                    <motion.h1
-                        className="text-4xl md:text-6xl font-bold text-white mb-4"
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                    >
-                        Upcoming Events
-                    </motion.h1>
-                    <motion.p
-                        className="text-stone-400 max-w-2xl mx-auto text-lg"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ delay: 0.2 }}
-                    >
-                        Choose your event and secure your seats for an unforgettable rodeo experience
-                    </motion.p>
-                </div>
+  <div class="login-card" id="loginCard">
+    <h2>Admin Sign In</h2>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="emailInput" placeholder="admin@holmdalerodeo.ca" />
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="passwordInput" placeholder="Password" />
+    </div>
+    <button class="btn-login" onclick="login()">Sign In</button>
+    <div class="error-msg" id="loginError"></div>
+  </div>
 
-                {isLoading ? (
-                    <div className="grid gap-6">
-                        {[1, 2, 3].map((i) => (
-                            <Card key={i} className="bg-stone-900 border-stone-800 p-6">
-                                <div className="flex flex-col md:flex-row gap-6">
-                                    <Skeleton className="w-full md:w-64 h-48 rounded-xl" />
-                                    <div className="flex-1 space-y-4">
-                                        <Skeleton className="h-8 w-3/4" />
-                                        <Skeleton className="h-4 w-1/2" />
-                                        <Skeleton className="h-4 w-1/3" />
-                                    </div>
-                                </div>
-                            </Card>
-                        ))}
-                    </div>
-                ) : events.length === 0 ? (
-                    <Card className="bg-stone-900 border-stone-800 p-12 text-center">
-                        <Ticket className="w-16 h-16 text-stone-600 mx-auto mb-4" />
-                        <h3 className="text-xl font-semibold text-white mb-2">No Events Scheduled</h3>
-                        <p className="text-stone-400">Check back soon for upcoming rodeo events!</p>
-                    </Card>
-                ) : (
-                    <div className="grid gap-6">
-                        {events.map((event, index) => (
-                            <motion.div
-                                key={event.id}
-                                initial={{ opacity: 0, y: 30 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.5, delay: index * 0.1 }}
-                            >
-                                <Card className="bg-stone-900 border-stone-800 overflow-hidden group hover:border-green-500/30 transition-all duration-300">
-                                    <div className="flex flex-col lg:flex-row">
-                                        <div className="relative lg:w-80 h-56 lg:h-auto overflow-hidden">
-                                            <img
-                                                src={event.image_url || 'https://images.unsplash.com/photo-1570042225831-d98fa7577f1e?w=600&q=80'}
-                                                alt={event.title}
-                                                className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                                            />
-                                            {event.is_featured && (
-                                                <Badge className="absolute top-4 left-4 bg-green-500 text-stone-900 font-semibold">
-                                                    Featured Event
-                                                </Badge>
-                                            )}
-                                        </div>
+  <div class="flags-card" id="flagsCard">
+    <h2>Public Feature Visibility</h2>
+    <p class="subtitle">Toggle features on or off for the public website. Changes take effect immediately.</p>
+    <div id="flagsList"><div class="loading">Loading flags…</div></div>
+  </div>
+</div>
 
-                                        <div className="flex-1 p-6 lg:p-8">
-                                            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
-                                                <div className="flex-1">
-                                                    <h3 className="text-2xl font-bold text-white mb-4 group-hover:text-green-400 transition-colors">
-                                                        {event.title}
-                                                    </h3>
+<div class="toast" id="toast"></div>
 
-                                                    {event.description && (
-                                                        <p className="text-stone-400 mb-4 line-clamp-2">
-                                                            {event.description}
-                                                        </p>
-                                                    )}
+<script>
+  const API = 'https://rodeo-fresh-production-7348.up.railway.app/api';
+  let authToken = null;
 
-                                                    <div className="flex flex-wrap gap-4 text-sm">
-                                                        <div className="flex items-center gap-2 text-stone-300">
-                                                            <Calendar className="w-4 h-4 text-green-500" />
-                                                            <span>{format(new Date(event.date.replace('T00:00:00.000Z', 'T12:00:00.000Z')), 'EEEE, MMMM d, yyyy')}</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-2 text-stone-300">
-                                                            <Clock className="w-4 h-4 text-green-500" />
-                                                            <span>{event.time}</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-2 text-stone-300">
-                                                            <MapPin className="w-4 h-4 text-green-500" />
-                                                            <span>{event.venue || 'Main Arena'}</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
+  const LABELS = {
+    buy_friend_drink: { icon: '🍺', label: 'Buy a Friend a Drink', desc: 'NFC wristband credit transfers on holmdalerodeo.ca/buy-a-drink' },
+    online_admission:  { icon: '🎫', label: 'Online Admission Tickets', desc: 'Ticket purchase on holmdalerodeo.ca' },
+    online_merchandise:{ icon: '👕', label: 'Online Merchandise', desc: 'Merch store on holmdalerodeo.ca' },
+  };
 
-                                                <div className="lg:text-right">
-                                                    <div className="mb-4">
-                                                        <span className="text-stone-500 text-sm block mb-1">{event.id === '696b7bdc81676e7ff80617a1' ? 'Entry Fee' : 'Starting at'}</span>
-                                                        <span className="text-3xl font-bold text-green-400">
-                                                            ${event.id === '696b7bdc81676e7ff80617a1' ? '0' : (event.general_price || 30)}
-                                                        </span>
-                                                    </div>
+  async function login() {
+    const email = document.getElementById('emailInput').value.trim();
+    const password = document.getElementById('passwordInput').value;
+    document.getElementById('loginError').textContent = '';
+    if (!email || !password) {
+      document.getElementById('loginError').textContent = 'Please enter email and password.';
+      return;
+    }
+    try {
+      const res = await fetch(`${API}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || 'Login failed');
+      authToken = data.token;
+      document.getElementById('loginCard').style.display = 'none';
+      document.getElementById('flagsCard').style.display = 'block';
+      loadFlags();
+    } catch (e) {
+      document.getElementById('loginError').textContent = e.message;
+    }
+  }
 
-                                                    <div className="flex flex-wrap gap-2 lg:justify-end mb-4">
-                                                        {event.general_available > 0 && (
-                                                            <Badge variant="outline" className="border-green-500/50 text-green-400">
-                                                                General Available
-                                                            </Badge>
-                                                        )}
-                                                        {event.premium_available > 0 && (
-                                                            <Badge variant="outline" className="border-blue-500/50 text-blue-400">
-                                                                Premium Available
-                                                            </Badge>
-                                                        )}
-                                                        {event.vip_available > 0 && (
-                                                            <Badge variant="outline" className="border-green-500/50 text-green-400">
-                                                                VIP Available
-                                                            </Badge>
-                                                        )}
-                                                    </div>
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter') login();
+  });
 
-                                                    {event.id !== '696b7bdc81676e7ff80617a1' && (
-                                                        <Link to={`${createPageUrl('BuyTickets')}?eventId=${event.id}`}>
-                                                            <Button className="bg-green-500 hover:bg-green-600 text-stone-900 font-semibold w-full lg:w-auto group/btn">
-                                                                Buy Tickets
-                                                                <ArrowRight className="w-4 h-4 ml-2 transition-transform group-hover/btn:translate-x-1" />
-                                                            </Button>
-                                                        </Link>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </Card>
-                            </motion.div>
-                        ))}
-                    </div>
-                )}
-            </div>
+  async function loadFlags() {
+    try {
+      const res = await fetch(`${API}/features`);
+      const flags = await res.json();
+      renderFlags(flags);
+    } catch (e) {
+      document.getElementById('flagsList').innerHTML = '<div class="loading">Failed to load flags.</div>';
+    }
+  }
+
+  function renderFlags(flags) {
+    const el = document.getElementById('flagsList');
+    el.innerHTML = '';
+    const order = ['buy_friend_drink', 'online_admission', 'online_merchandise'];
+    const keys = [...new Set([...order, ...Object.keys(flags)])];
+    keys.forEach(key => {
+      if (!flags[key]) return;
+      const f = flags[key];
+      const meta = LABELS[key] || { icon: '⚙️', label: f.label || key, desc: f.description || '' };
+      const enabled = f.enabled;
+      const updated = f.updated_at ? new Date(f.updated_at).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+      const by = f.updated_by ? ` by ${f.updated_by}` : '';
+
+      const row = document.createElement('div');
+      row.className = 'flag-row';
+      row.innerHTML = `
+        <div class="flag-info">
+          <div class="flag-label">${meta.icon} ${meta.label}</div>
+          <div class="flag-desc">${meta.desc}</div>
+          ${updated ? `<div class="flag-meta">Last changed ${updated}${by}</div>` : ''}
         </div>
-    );
-}
+        <div class="toggle-wrap">
+          <span class="badge ${enabled ? 'on' : 'off'}">${enabled ? 'ON' : 'OFF'}</span>
+          <label class="toggle" id="toggle_${key}">
+            <input type="checkbox" ${enabled ? 'checked' : ''} onchange="setFlag('${key}', this.checked, this)" />
+            <span class="slider"></span>
+          </label>
+        </div>`;
+      el.appendChild(row);
+    });
+  }
+
+  async function setFlag(key, value, checkbox) {
+    const wrap = document.getElementById(`toggle_${key}`);
+    wrap.classList.add('saving');
+    try {
+      const res = await fetch(`${API}/features/${key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+        body: JSON.stringify({ enabled: value })
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Update failed');
+      showToast(`${key} turned ${value ? 'ON' : 'OFF'}`);
+      await loadFlags();
+    } catch (e) {
+      checkbox.checked = !value;
+      showToast(`Error: ${e.message}`);
+    } finally {
+      wrap.classList.remove('saving');
+    }
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+</script>
+</body>
+</html>

@@ -36,9 +36,9 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
     res.json(result.rows[0]);
   } catch (error) {
-    console.error('Error fetching drink:', error);
-    res.status(500).json({ error: 'Failed to fetch drink' });
-  }
+    console.error('Error serving drink:', error.message, error.stack);
+    res.status(500).json({ error: error.message });
+}
 });
 
 // POST serve drink (deduct from wristband credits AND inventory)

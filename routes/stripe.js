@@ -13,12 +13,14 @@ function requireRole(roles) {
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
       const userRoles = decoded.roles || [];
+      console.log(`[requireRole] email=${decoded.email} roles=${JSON.stringify(userRoles)} required=${JSON.stringify(roles)}`);
       if (!roles.some(r => userRoles.includes(r))) {
         return res.status(403).json({ error: 'Insufficient permissions' });
       }
       req.staff = decoded;
       next();
     } catch (e) {
+      console.log(`[requireRole] token error: ${e.message}`);
       res.status(401).json({ error: 'Invalid token' });
     }
   };
@@ -78,7 +80,6 @@ router.post('/capture-payment', async (req, res) => {
     const tickets = parseInt(paymentIntent.metadata?.tickets || 0);
     const amount = tickets * 7;
 
-    // Capture only if not already captured
     if (paymentIntent.status === 'requires_capture') {
       await stripe.paymentIntents.capture(payment_intent_id);
       console.log(`[Stripe Terminal] Payment captured: ${payment_intent_id} rfid=${rfidUid} tickets=${tickets}`);
@@ -88,6 +89,8 @@ router.post('/capture-payment', async (req, res) => {
 
     // Save to stripe_payments table
     try {
+      const charges = await stripe.charges.list({ payment_intent: payment_intent_id, limit: 1 });
+      const chargeId = charges.data[0]?.id || null;
       await pool.query(
         `INSERT INTO stripe_payments (payment_intent_id, rfid_uid, tickets, amount, status)
          VALUES ($1, $2, $3, $4, 'captured')
@@ -98,7 +101,6 @@ router.post('/capture-payment', async (req, res) => {
       console.error('[Stripe] Failed to save payment record:', e.message);
     }
 
-    // Add credits to wristband
     if (rfidUid && tickets > 0) {
       await pool.query(
         'UPDATE wristbands SET credits = credits + $1 WHERE UPPER(rfid_uid) = $2',
@@ -121,13 +123,13 @@ router.get('/payment-lookup', requireRole(['admin', 'manager']), async (req, res
   try {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: 'Search query required' });
+    console.log(`[Payment Lookup] query=${q} staff=${req.staff?.email}`);
 
     let paymentIntentIds = [];
 
     if (q.startsWith('pi_')) {
       paymentIntentIds = [q];
     } else {
-      // Search our database by wristband UID
       const result = await pool.query(
         `SELECT payment_intent_id FROM stripe_payments 
          WHERE UPPER(rfid_uid) = UPPER($1)
@@ -179,20 +181,13 @@ router.post('/refund', requireRole(['admin', 'manager']), async (req, res) => {
     if (!payment_intent_id) return res.status(400).json({ error: 'payment_intent_id required' });
 
     const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
-    if (!paymentIntent) return res.status(404).json({ error: 'Payment not found' });
-
     const rfidUid = paymentIntent.metadata?.rfid_uid;
     const totalTickets = parseInt(paymentIntent.metadata?.tickets || 0);
     const ticketsToRefund = refund_tickets ? parseInt(refund_tickets) : totalTickets;
-
-    if (ticketsToRefund < 1 || ticketsToRefund > totalTickets) {
-      return res.status(400).json({ error: `Invalid ticket count. Max refundable: ${totalTickets}` });
-    }
-
     const refundAmount = ticketsToRefund * 700;
 
     const charges = await stripe.charges.list({ payment_intent: payment_intent_id });
-    if (!charges.data.length) return res.status(404).json({ error: 'No charge found for this payment' });
+    if (!charges.data.length) return res.status(404).json({ error: 'No charge found' });
 
     const charge = charges.data[0];
     if (charge.refunded) return res.status(400).json({ error: 'Payment already fully refunded' });
@@ -210,35 +205,65 @@ router.post('/refund', requireRole(['admin', 'manager']), async (req, res) => {
 
     console.log(`[Stripe Refund] ${refund.id} $${(refundAmount/100).toFixed(2)} by ${req.staff.email}`);
 
-    // Update stripe_payments table
     try {
       await pool.query(
-        `UPDATE stripe_payments SET refunded = TRUE, refund_id = $1 
-         WHERE payment_intent_id = $2`,
+        `UPDATE stripe_payments SET refunded = TRUE, refund_id = $1 WHERE payment_intent_id = $2`,
         [refund.id, payment_intent_id]
       );
     } catch (e) {
       console.error('[Stripe] Failed to update refund record:', e.message);
     }
 
-    // Reverse credits on wristband
     if (rfidUid && ticketsToRefund > 0) {
       await pool.query(
         'UPDATE wristbands SET credits = GREATEST(0, credits - $1) WHERE UPPER(rfid_uid) = $2',
         [ticketsToRefund * 7, rfidUid.toUpperCase()]
       );
-      console.log(`✓ Reversed ${ticketsToRefund * 7} credits from wristband ${rfidUid}`);
     }
 
-    res.json({
-      success: true,
-      refund_id: refund.id,
-      amount_refunded: refundAmount,
-      tickets_refunded: ticketsToRefund,
-      rfid_uid: rfidUid
-    });
+    res.json({ success: true, refund_id: refund.id, amount_refunded: refundAmount, tickets_refunded: ticketsToRefund });
   } catch (error) {
     console.error('[Stripe Refund] Error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// POST /api/stripe/refund-confirm
+// Called after Terminal SDK processes card-present refund
+// ============================================
+router.post('/refund-confirm', requireRole(['admin', 'manager']), async (req, res) => {
+  try {
+    const { payment_intent_id, refund_tickets } = req.body;
+    console.log(`[Refund Confirm] pi=${payment_intent_id} tickets=${refund_tickets} staff=${req.staff?.email}`);
+    if (!payment_intent_id) return res.status(400).json({ error: 'payment_intent_id required' });
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
+    const rfidUid = paymentIntent.metadata?.rfid_uid;
+    const totalTickets = parseInt(paymentIntent.metadata?.tickets || 0);
+    const ticketsToRefund = refund_tickets ? parseInt(refund_tickets) : totalTickets;
+    const creditsToReverse = ticketsToRefund * 7;
+
+    try {
+      await pool.query(
+        `UPDATE stripe_payments SET refunded = TRUE WHERE payment_intent_id = $1`,
+        [payment_intent_id]
+      );
+    } catch (e) {
+      console.error('[Stripe] Failed to update refund record:', e.message);
+    }
+
+    if (rfidUid && ticketsToRefund > 0) {
+      await pool.query(
+        'UPDATE wristbands SET credits = GREATEST(0, credits - $1) WHERE UPPER(rfid_uid) = $2',
+        [creditsToReverse, rfidUid.toUpperCase()]
+      );
+      console.log(`✓ Reversed ${creditsToReverse} credits from wristband ${rfidUid}`);
+    }
+
+    res.json({ success: true, tickets_refunded: ticketsToRefund, credits_reversed: creditsToReverse });
+  } catch (error) {
+    console.error('[Refund Confirm] Error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

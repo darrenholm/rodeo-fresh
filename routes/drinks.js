@@ -16,7 +16,6 @@ router.get('/', authenticateToken, async (req, res) => {
        WHERE active = true
        ORDER BY name`
     );
-    
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching drinks:', error);
@@ -28,16 +27,13 @@ router.get('/', authenticateToken, async (req, res) => {
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    
     const result = await pool.query(
       'SELECT * FROM drinks WHERE id = $1',
       [id]
     );
-    
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Drink not found' });
     }
-    
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error fetching drink:', error);
@@ -49,7 +45,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 router.post('/serve', authenticateToken, async (req, res) => {
   try {
     const { rfid_uid, drink_id } = req.body;
-    
+
     if (!rfid_uid || !drink_id) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
@@ -59,53 +55,48 @@ router.post('/serve', authenticateToken, async (req, res) => {
       'SELECT * FROM drinks WHERE id = $1 AND active = true',
       [drink_id]
     );
-    
     if (drinkResult.rows.length === 0) {
       return res.status(404).json({ error: 'Drink not found' });
     }
-    
     const drink = drinkResult.rows[0];
-    
+
     // Check stock
     if (drink.stock_remaining < 1) {
       return res.status(400).json({ error: 'Drink out of stock' });
     }
 
-    // Get wristband
+    // Get wristband (case insensitive)
     const bandResult = await pool.query(
-      'SELECT * FROM wristbands WHERE rfid_uid = $1',
+      'SELECT * FROM wristbands WHERE UPPER(rfid_uid) = UPPER($1)',
       [rfid_uid]
     );
-    
     if (bandResult.rows.length === 0) {
       return res.status(404).json({ error: 'Wristband not found' });
     }
-    
     const band = bandResult.rows[0];
-    
+
     // Check age approval
     if (!band.alcohol_approved) {
       return res.status(403).json({ error: 'Age not verified' });
     }
-    
-   // Check credits (parse as float since PostgreSQL returns strings)
-const bandCredits = parseFloat(band.credits);
-const drinkPrice = parseFloat(drink.price);
 
-if (bandCredits < drinkPrice) {
-  return res.status(400).json({ 
-    error: 'Insufficient credits',
-    available: bandCredits,
-    required: drinkPrice
-  });
-}
+    // Check credits
+    const bandCredits = parseFloat(band.credits);
+    const drinkPrice = parseFloat(drink.price);
+    if (bandCredits < drinkPrice) {
+      return res.status(400).json({
+        error: 'Insufficient credits',
+        available: bandCredits,
+        required: drinkPrice
+      });
+    }
 
-    // Deduct credits from wristband
+    // Deduct credits from wristband (case insensitive)
     await pool.query(
       `UPDATE wristbands 
        SET credits = credits - $1,
            credits_spent = credits_spent + $1
-       WHERE rfid_uid = $2`,
+       WHERE UPPER(rfid_uid) = UPPER($2)`,
       [drink.price, rfid_uid]
     );
 
@@ -126,18 +117,18 @@ if (bandCredits < drinkPrice) {
         description, drink_name, created_by
       ) VALUES ($1, $2, $3, 'drink', $4, $5, $6)`,
       [
-        transactionId, 
-        band.id, 
-        drink.price, 
+        transactionId,
+        band.id,
+        drink.price,
         `${drink.name} served`,
         drink.name,
         req.user.email
       ]
     );
 
-    // Get updated wristband
+    // Get updated wristband (case insensitive)
     const updatedBand = await pool.query(
-      'SELECT * FROM wristbands WHERE rfid_uid = $1',
+      'SELECT * FROM wristbands WHERE UPPER(rfid_uid) = UPPER($1)',
       [rfid_uid]
     );
 
@@ -162,11 +153,9 @@ router.put('/:id/stock', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { stock_quantity } = req.body;
-
     if (stock_quantity === undefined) {
       return res.status(400).json({ error: 'Missing stock_quantity' });
     }
-
     const result = await pool.query(
       `UPDATE drinks
        SET stock_quantity = $1,
@@ -175,18 +164,11 @@ router.put('/:id/stock', authenticateToken, async (req, res) => {
        RETURNING *`,
       [stock_quantity, id]
     );
-
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Drink not found' });
     }
-
     console.log(`✓ Stock updated: ${result.rows[0].name} = ${stock_quantity}`);
-
-    res.json({
-      success: true,
-      drink: result.rows[0]
-    });
-
+    res.json({ success: true, drink: result.rows[0] });
   } catch (error) {
     console.error('Error updating stock:', error);
     res.status(500).json({ error: 'Failed to update stock' });
@@ -201,7 +183,6 @@ router.post('/:id/restock', authenticateToken, async (req, res) => {
     if (!quantity) {
       return res.status(400).json({ error: 'Missing quantity' });
     }
-
     const result = await pool.query(
       `UPDATE drinks
        SET stock_remaining = stock_remaining + $1,
@@ -210,18 +191,11 @@ router.post('/:id/restock', authenticateToken, async (req, res) => {
        RETURNING *`,
       [quantity, id]
     );
-
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Drink not found' });
     }
-
     console.log(`✓ Restocked: ${result.rows[0].name} +${quantity}`);
-
-    res.json({
-      success: true,
-      drink: result.rows[0]
-    });
-
+    res.json({ success: true, drink: result.rows[0] });
   } catch (error) {
     console.error('Error restocking:', error);
     res.status(500).json({ error: 'Failed to restock' });
@@ -238,18 +212,17 @@ router.get('/admin/inventory', authenticateToken, async (req, res) => {
        FROM drinks
        ORDER BY total_sold DESC`
     );
-    
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching inventory:', error);
     res.status(500).json({ error: 'Failed to fetch inventory' });
   }
 });
+
 // POST refund drink (undo a serve)
 router.post('/refund', authenticateToken, async (req, res) => {
   try {
     const { transaction_id } = req.body;
-    
     if (!transaction_id) {
       return res.status(400).json({ error: 'Missing transaction_id' });
     }
@@ -259,25 +232,21 @@ router.post('/refund', authenticateToken, async (req, res) => {
       'SELECT * FROM bar_transactions WHERE id = $1',
       [transaction_id]
     );
-    
     if (transResult.rows.length === 0) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
-    
     const transaction = transResult.rows[0];
-    
-    // Get wristband and drink info
+
+    // Get wristband by ID (numeric)
     const bandResult = await pool.query(
       'SELECT * FROM wristbands WHERE id = $1',
       [transaction.wristband_id]
     );
-    
     if (bandResult.rows.length === 0) {
       return res.status(404).json({ error: 'Wristband not found' });
     }
-    
     const band = bandResult.rows[0];
-    
+
     // Get drink to restore stock
     const drinkResult = await pool.query(
       'SELECT * FROM drinks WHERE name = $1',
@@ -337,27 +306,19 @@ router.post('/refund', authenticateToken, async (req, res) => {
 router.post('/create', authenticateToken, async (req, res) => {
   try {
     const { id, name, price, stock_quantity } = req.body;
-    
     if (!id || !name) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-
     const result = await pool.query(
       `INSERT INTO drinks (id, name, price, stock_quantity, stock_remaining, active)
        VALUES ($1, $2, $3, $4, $4, true)
        RETURNING *`,
       [id, name, price || 7.00, stock_quantity || 0]
     );
-
     console.log(`✓ Created drink: ${name}`);
-
-    res.json({
-      success: true,
-      drink: result.rows[0]
-    });
-
+    res.json({ success: true, drink: result.rows[0] });
   } catch (error) {
-    if (error.code === '23505') { // Duplicate key
+    if (error.code === '23505') {
       return res.status(400).json({ error: 'Drink already exists' });
     }
     console.error('Error creating drink:', error);
@@ -369,8 +330,6 @@ router.post('/create', authenticateToken, async (req, res) => {
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // Soft delete - set active to false instead of actually deleting
     const result = await pool.query(
       `UPDATE drinks 
        SET active = false
@@ -378,18 +337,11 @@ router.delete('/:id', authenticateToken, async (req, res) => {
        RETURNING *`,
       [id]
     );
-
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Drink not found' });
     }
-
     console.log(`✓ Removed drink: ${result.rows[0].name}`);
-
-    res.json({
-      success: true,
-      drink: result.rows[0]
-    });
-
+    res.json({ success: true, drink: result.rows[0] });
   } catch (error) {
     console.error('Error removing drink:', error);
     res.status(500).json({ error: 'Failed to remove drink' });

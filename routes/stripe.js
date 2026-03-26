@@ -88,7 +88,6 @@ router.post('/capture-payment', async (req, res) => {
     }
 
     try {
-      const charges = await stripe.charges.list({ payment_intent: payment_intent_id, limit: 1 });
       await pool.query(
         `INSERT INTO stripe_payments (payment_intent_id, rfid_uid, tickets, amount, status)
          VALUES ($1, $2, $3, $4, 'captured')
@@ -228,7 +227,8 @@ router.post('/refund', requireRole(['admin', 'manager']), async (req, res) => {
 
 // ============================================
 // POST /api/stripe/refund-confirm
-// Issues refund via Stripe API and reverses wristband credits
+// Called after Terminal SDK processes card-present refund
+// Just updates our database — Stripe refund already done by Terminal SDK
 // ============================================
 router.post('/refund-confirm', requireRole(['admin', 'manager']), async (req, res) => {
   try {
@@ -238,36 +238,23 @@ router.post('/refund-confirm', requireRole(['admin', 'manager']), async (req, re
 
     const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
     const rfidUid = paymentIntent.metadata?.rfid_uid;
-    const totalTickets = parseInt(paymentIntent.metadata?.tickets || 0);
-    const ticketsToRefund = refund_tickets ? parseInt(refund_tickets) : totalTickets;
-    const refundAmount = ticketsToRefund * 700;
-
-    const charges = await stripe.charges.list({ payment_intent: payment_intent_id, limit: 1 });
-    if (!charges.data.length) return res.status(404).json({ error: 'No charge found' });
-    const charge = charges.data[0];
-
-    const refund = await stripe.refunds.create({
-      charge: charge.id,
-      amount: refundAmount,
-      reason: 'requested_by_customer'
-    });
-
-    console.log(`[Refund Confirm] Refund created: ${refund.id} $${(refundAmount/100).toFixed(2)}`);
+    const ticketsToRefund = refund_tickets ? parseInt(refund_tickets) : parseInt(paymentIntent.metadata?.tickets || 0);
+    const creditsToReverse = ticketsToRefund * 7;
 
     await pool.query(
-      `UPDATE stripe_payments SET refunded = TRUE, refund_id = $1 WHERE payment_intent_id = $2`,
-      [refund.id, payment_intent_id]
+      `UPDATE stripe_payments SET refunded = TRUE WHERE payment_intent_id = $1`,
+      [payment_intent_id]
     ).catch(e => console.error('DB update error:', e.message));
 
     if (rfidUid && ticketsToRefund > 0) {
       await pool.query(
         'UPDATE wristbands SET credits = GREATEST(0, credits - $1) WHERE UPPER(rfid_uid) = $2',
-        [ticketsToRefund * 7, rfidUid.toUpperCase()]
+        [creditsToReverse, rfidUid.toUpperCase()]
       );
-      console.log(`✓ Reversed ${ticketsToRefund * 7} credits from wristband ${rfidUid}`);
+      console.log(`✓ Reversed ${creditsToReverse} credits from wristband ${rfidUid}`);
     }
 
-    res.json({ success: true, refund_id: refund.id, amount_refunded: refundAmount });
+    res.json({ success: true, tickets_refunded: ticketsToRefund, credits_reversed: creditsToReverse });
   } catch (error) {
     console.error('[Refund Confirm] Error:', error.message);
     res.status(500).json({ error: error.message });

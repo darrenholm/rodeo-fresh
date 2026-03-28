@@ -94,6 +94,7 @@ router.post('/ticket-checkout', async (req, res) => {
 
     const confirmationCode = `WW-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
 
+    // Store pending checkout data first
     pendingCheckouts.set(confirmationCode, {
       createdAt: Date.now(),
       eventId,
@@ -103,11 +104,12 @@ router.post('/ticket-checkout', async (req, res) => {
       customerEmail,
       customerPhone: customerPhone || '',
       total: total.toFixed(2),
-      barCredits: barCredits || 0
+      barCredits: barCredits || 0,
+      monerisTicket: null // will be set after preload
     });
 
     const { storeId, apiToken, checkoutId } = getMonerisCredentials();
-    const ticket = await monerisPreload({
+    const monerisTicket = await monerisPreload({
       store_id: storeId,
       api_token: apiToken,
       checkout_id: checkoutId,
@@ -125,8 +127,13 @@ router.post('/ticket-checkout', async (req, res) => {
       }
     });
 
-    console.log(`✓ Moneris checkout created: ${confirmationCode}, total: $${total.toFixed(2)}`);
-    res.json({ ticket, confirmation_code: confirmationCode });
+    // Save the Moneris ticket token for receipt verification later
+    const checkoutEntry = pendingCheckouts.get(confirmationCode);
+    checkoutEntry.monerisTicket = monerisTicket;
+    pendingCheckouts.set(confirmationCode, checkoutEntry);
+
+    console.log(`✓ Moneris checkout created: ${confirmationCode}, total: $${total.toFixed(2)}, monerisTicket: ${monerisTicket}`);
+    res.json({ ticket: monerisTicket, confirmation_code: confirmationCode });
   } catch (error) {
     console.error('Ticket checkout error:', error);
     res.status(500).json({ error: error.message });
@@ -159,7 +166,12 @@ router.post('/confirm-payment', async (req, res) => {
       return res.status(404).json({ error: 'Checkout session not found or expired' });
     }
 
-    // ── Verify payment with Moneris before confirming ──
+    if (!checkoutData.monerisTicket) {
+      console.error(`No Moneris ticket token found for: ${confirmation_code}`);
+      return res.status(400).json({ error: 'Missing Moneris ticket token' });
+    }
+
+    // ── Verify payment with Moneris using the saved ticket token ──
     const { storeId, apiToken, checkoutId } = getMonerisCredentials();
     const verifyResponse = await fetch(MONERIS_PRELOAD_URL, {
       method: 'POST',
@@ -169,7 +181,7 @@ router.post('/confirm-payment', async (req, res) => {
         api_token: apiToken,
         checkout_id: checkoutId,
         action: 'receipt',
-        ticket: confirmation_code,
+        ticket: checkoutData.monerisTicket,
         environment: 'prod'
       })
     });
@@ -361,7 +373,6 @@ router.post('/webhook', async (req, res) => {
 
 // ============================================
 // POST /api/moneris/terminal-purchase
-// PAX A920 via Moneris Cloud IPgate
 // ============================================
 router.post('/terminal-purchase', async (req, res) => {
   try {

@@ -143,6 +143,7 @@ router.post('/confirm-payment', async (req, res) => {
       return res.status(400).json({ error: 'Confirmation code required' });
     }
 
+    // Check for duplicate order
     const existingOrder = await pool.query(
       'SELECT * FROM ticket_orders WHERE confirmation_code = $1',
       [confirmation_code]
@@ -158,6 +159,36 @@ router.post('/confirm-payment', async (req, res) => {
       return res.status(404).json({ error: 'Checkout session not found or expired' });
     }
 
+    // ── Verify payment with Moneris before confirming ──
+    const { storeId, apiToken, checkoutId } = getMonerisCredentials();
+    const verifyResponse = await fetch(MONERIS_PRELOAD_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        store_id: storeId,
+        api_token: apiToken,
+        checkout_id: checkoutId,
+        action: 'receipt',
+        ticket: confirmation_code,
+        environment: 'prod'
+      })
+    });
+
+    const verifyResult = await verifyResponse.json();
+    console.log(`[Moneris Receipt] ${confirmation_code}:`, JSON.stringify(verifyResult?.response));
+
+    const paymentSuccess = verifyResult?.response?.success === 'true' &&
+                           verifyResult?.response?.result === 'a';
+
+    if (!paymentSuccess) {
+      console.log(`[Moneris] Payment NOT approved for ${confirmation_code}, result: ${verifyResult?.response?.result}`);
+      pendingCheckouts.delete(confirmation_code);
+      return res.status(402).json({ error: 'Payment was not approved by Moneris' });
+    }
+
+    console.log(`[Moneris] Payment verified for ${confirmation_code}`);
+
+    // Create the order
     const id = `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const orderResult = await pool.query(
       `INSERT INTO ticket_orders (
@@ -354,8 +385,6 @@ router.post('/terminal-purchase', async (req, res) => {
 
     const amountDollars = (parseInt(amount, 10) / 100).toFixed(2);
 
-    // Embed rfid_uid and tickets in order_id so callback can update wristband
-    // Format: RODEO-{timestamp}-{rfid_uid}-{tickets}
     const enrichedOrderId = rfid_uid && tickets
       ? `RODEO-${Date.now()}-${rfid_uid}-${tickets}`
       : order_id;
@@ -406,14 +435,12 @@ router.post('/terminal-purchase', async (req, res) => {
 
 // ============================================
 // POST /api/moneris/terminal-callback
-// Moneris posts async transaction result here
 // ============================================
 router.post('/terminal-callback', async (req, res) => {
   try {
     console.log('[Moneris Terminal Callback]', JSON.stringify(req.body));
     const data = req.body;
 
-    // Always respond 200 immediately
     res.status(200).json({ received: true });
 
     const responseCode = data?.response?.responseCode || data?.responseCode || '';
@@ -427,8 +454,6 @@ router.post('/terminal-callback', async (req, res) => {
     const orderId = data?.response?.orderId || data?.response?.order_id || data?.orderId || '';
     console.log('[Terminal Callback] Approved! Order:', orderId);
 
-    // Parse wristband UID and tickets from order ID
-    // Format: RODEO-{timestamp}-{rfid_uid}-{tickets}
     const parts = orderId.split('-');
     if (parts.length >= 4) {
       const rfidUid = parts[2];

@@ -187,7 +187,7 @@ router.post('/confirm-payment', async (req, res) => {
     });
 
     const verifyResult = await verifyResponse.json();
-    console.log(`[Moneris Receipt] ${confirmation_code}:`, JSON.stringify(verifyResult?.response));
+    console.log(`[Moneris Receipt] ${confirmation_code}:`, JSON.stringify(verifyResult));
 
     const paymentSuccess = verifyResult?.response?.success === 'true' &&
                        verifyResult?.receipt?.result === 'a';

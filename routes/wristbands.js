@@ -106,6 +106,37 @@ router.post('/approve-age', authenticateToken, async (req, res) => {
   }
 });
 
+// POST revoke age 19+ (Gate 2 — undo accidental approval)
+router.post('/revoke-age', authenticateToken, async (req, res) => {
+  try {
+    const { rfid_uid } = req.body;
+    if (!rfid_uid) {
+      return res.status(400).json({ error: 'Missing rfid_uid' });
+    }
+
+    const uid = normalizeUid(rfid_uid);
+    const result = await pool.query(
+      `UPDATE wristbands 
+       SET alcohol_approved = false,
+           approved_date = NULL,
+           approved_by = NULL
+       WHERE UPPER(rfid_uid) = $1
+       RETURNING *`,
+      [uid]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Wristband not found' });
+    }
+
+    console.log(`✓ Age revoked: ${uid} by ${req.user.email}`);
+    res.json({ success: true, wristband: result.rows[0] });
+
+  } catch (error) {
+    console.error('Error revoking age:', error);
+    res.status(500).json({ error: 'Failed to revoke age' });
+  }
+});
+
 // POST add credits (Credit Booth)
 router.post('/add-credits', authenticateToken, async (req, res) => {
   try {

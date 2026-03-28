@@ -16,7 +16,7 @@ router.get('/rfid/:uid', authenticateToken, async (req, res) => {
       `SELECT w.*, t.event_id, t.status as ticket_status
        FROM wristbands w
        LEFT JOIN ticket_orders t ON w.ticket_order_id = t.id
-       WHERE w.rfid_uid = $1`,
+       WHERE UPPER(w.rfid_uid) = UPPER($1)`,
       [uid]
     );
     

@@ -65,11 +65,12 @@ router.get('/daily', authenticateToken, async (req, res) => {
         // 5. Drinks served (bar purchases / transactions)
         let drinksServed = 0;
         try {
-            const barResult = await pool.query(`
-                SELECT COALESCE(SUM(quantity), 0) as drinks_served
-                FROM bar_purchases
-                WHERE (created_at AT TIME ZONE 'America/Toronto')::date = $1
-            `, [date]);
+const barResult = await pool.query(`
+    SELECT COUNT(*) as drinks_served
+    FROM bar_transactions
+    WHERE transaction_type = 'drink'
+    AND (created_date AT TIME ZONE 'America/Toronto')::date = $1
+`, [date]);
             drinksServed = parseInt(barResult.rows[0].drinks_served) || 0;
         } catch(e) {
             try {

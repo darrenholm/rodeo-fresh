@@ -634,6 +634,22 @@ router.post('/vendor-confirm', async (req, res) => {
           })
         });
         console.log(`✓ Vendor confirmation email sent to ${checkoutData.email}`);
+        // Notify admin
+await fetch('https://api.resend.com/emails', {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    from,
+    to: ['darren@holmgraphics.ca'],
+    subject: `💳 Vendor Payment Received: ${checkoutData.business_name}`,
+    html: `<h2>Vendor Payment Received</h2>
+<p><strong>${checkoutData.business_name}</strong> (${checkoutData.contact_name}) has completed their booth payment.</p>
+<p>Email: ${checkoutData.email}</p>
+<p>Booth: ${checkoutData.booth_size}</p>
+<p>Amount Paid: <strong>$${parseFloat(checkoutData.amount).toFixed(2)}</strong></p>
+<p>Reference: ${confirmation_code}</p>`
+  })
+});
       }
     } catch (emailErr) {
       console.error('[Vendor Confirm] Email error:', emailErr.message);

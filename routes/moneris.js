@@ -6,10 +6,8 @@ const QRCode = require('qrcode');
 
 const MONERIS_PRELOAD_URL = 'https://gateway.moneris.com/chkt/request/request.php';
 
-// In-memory store for pending checkout data (cleared after use)
 const pendingCheckouts = new Map();
 
-// Clean up abandoned checkouts older than 1 hour
 setInterval(() => {
   const oneHourAgo = Date.now() - (60 * 60 * 1000);
   for (const [code, data] of pendingCheckouts.entries()) {
@@ -94,7 +92,6 @@ router.post('/ticket-checkout', async (req, res) => {
 
     const confirmationCode = `WW-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
 
-    // Store pending checkout data first
     pendingCheckouts.set(confirmationCode, {
       createdAt: Date.now(),
       eventId,
@@ -105,7 +102,7 @@ router.post('/ticket-checkout', async (req, res) => {
       customerPhone: customerPhone || '',
       total: total.toFixed(2),
       barCredits: barCredits || 0,
-      monerisTicket: null // will be set after preload
+      monerisTicket: null
     });
 
     const { storeId, apiToken, checkoutId } = getMonerisCredentials();
@@ -127,7 +124,6 @@ router.post('/ticket-checkout', async (req, res) => {
       }
     });
 
-    // Save the Moneris ticket token for receipt verification later
     const checkoutEntry = pendingCheckouts.get(confirmationCode);
     checkoutEntry.monerisTicket = monerisTicket;
     pendingCheckouts.set(confirmationCode, checkoutEntry);
@@ -150,7 +146,6 @@ router.post('/confirm-payment', async (req, res) => {
       return res.status(400).json({ error: 'Confirmation code required' });
     }
 
-    // Check for duplicate order
     const existingOrder = await pool.query(
       'SELECT * FROM ticket_orders WHERE confirmation_code = $1',
       [confirmation_code]
@@ -171,7 +166,6 @@ router.post('/confirm-payment', async (req, res) => {
       return res.status(400).json({ error: 'Missing Moneris ticket token' });
     }
 
-    // ── Verify payment with Moneris using the saved ticket token ──
     const { storeId, apiToken, checkoutId } = getMonerisCredentials();
     const verifyResponse = await fetch(MONERIS_PRELOAD_URL, {
       method: 'POST',
@@ -190,7 +184,7 @@ router.post('/confirm-payment', async (req, res) => {
     console.log(`[Moneris Receipt] ${confirmation_code}: result=${verifyResult?.response?.receipt?.result}`);
 
     const paymentSuccess = verifyResult?.response?.success === 'true' &&
-                       verifyResult?.response?.receipt?.result === 'a';
+                           verifyResult?.response?.receipt?.result === 'a';
 
     if (!paymentSuccess) {
       console.log(`[Moneris] Payment NOT approved for ${confirmation_code}, result: ${verifyResult?.response?.result}`);
@@ -200,7 +194,6 @@ router.post('/confirm-payment', async (req, res) => {
 
     console.log(`[Moneris] Payment verified for ${confirmation_code}`);
 
-    // Create the order
     const id = `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const orderResult = await pool.query(
       `INSERT INTO ticket_orders (
@@ -225,7 +218,6 @@ router.post('/confirm-payment', async (req, res) => {
       [totalQuantity, checkoutData.eventId]
     );
 
-    // Send confirmation email
     try {
       const apiKey = process.env.RESEND_API_KEY;
       const from = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
@@ -481,6 +473,178 @@ router.post('/terminal-callback', async (req, res) => {
     }
   } catch (error) {
     console.error('[Terminal Callback] Error:', error);
+  }
+});
+
+// ============================================
+// POST /api/moneris/vendor-checkout
+// Creates Moneris checkout session for vendor booth payment
+// ============================================
+router.post('/vendor-checkout', async (req, res) => {
+  try {
+    const { vendor_id, confirmation_code, amount, booth_size, business_name, email, contact_name } = req.body;
+
+    if (!vendor_id || !confirmation_code || !amount || !email) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const orderNo = `VND-${confirmation_code}`;
+
+    pendingCheckouts.set(orderNo, {
+      createdAt: Date.now(),
+      type: 'vendor',
+      vendor_id,
+      confirmation_code,
+      amount,
+      booth_size,
+      business_name,
+      email,
+      contact_name,
+      monerisTicket: null
+    });
+
+    const { storeId, apiToken, checkoutId } = getMonerisCredentials();
+    const subtotal = (parseFloat(amount) / 1.13).toFixed(2);
+    const hst = (parseFloat(amount) - parseFloat(subtotal)).toFixed(2);
+
+    const monerisTicket = await monerisPreload({
+      store_id: storeId,
+      api_token: apiToken,
+      checkout_id: checkoutId,
+      txn_total: parseFloat(amount).toFixed(2),
+      cart_subtotal: subtotal,
+      tax: { amount: hst, description: 'HST', rate: '13.00' },
+      environment: 'prod',
+      action: 'preload',
+      order_no: orderNo,
+      cust_id: email,
+      contact_details: {
+        email,
+        first_name: contact_name?.split(' ')[0] || contact_name || business_name,
+        last_name: contact_name?.split(' ').slice(1).join(' ') || ''
+      }
+    });
+
+    const entry = pendingCheckouts.get(orderNo);
+    entry.monerisTicket = monerisTicket;
+    pendingCheckouts.set(orderNo, entry);
+
+    console.log(`✓ Vendor checkout created: ${orderNo} $${amount} vendor=${vendor_id}`);
+    res.json({ ticket: monerisTicket, order_no: orderNo });
+  } catch (error) {
+    console.error('[Vendor Checkout] Error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// POST /api/moneris/vendor-confirm
+// Verifies Moneris payment and marks vendor as paid
+// ============================================
+router.post('/vendor-confirm', async (req, res) => {
+  try {
+    const { confirmation_code, vendor_id } = req.body;
+    if (!confirmation_code || !vendor_id) {
+      return res.status(400).json({ error: 'confirmation_code and vendor_id required' });
+    }
+
+    const orderNo = `VND-${confirmation_code}`;
+    const checkoutData = pendingCheckouts.get(orderNo);
+
+    if (!checkoutData?.monerisTicket) {
+      console.error(`[Vendor Confirm] No pending checkout for: ${orderNo}`);
+      return res.status(404).json({ error: 'Checkout session not found or expired' });
+    }
+
+    // Verify with Moneris
+    const { storeId, apiToken, checkoutId } = getMonerisCredentials();
+    const verifyResponse = await fetch(MONERIS_PRELOAD_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        store_id: storeId,
+        api_token: apiToken,
+        checkout_id: checkoutId,
+        action: 'receipt',
+        ticket: checkoutData.monerisTicket,
+        environment: 'prod'
+      })
+    });
+
+    const verifyResult = await verifyResponse.json();
+    console.log(`[Vendor Confirm] ${orderNo}: result=${verifyResult?.response?.receipt?.result}`);
+
+    const paymentSuccess = verifyResult?.response?.success === 'true' &&
+                           verifyResult?.response?.receipt?.result === 'a';
+
+    if (!paymentSuccess) {
+      console.log(`[Vendor Confirm] Payment NOT approved for ${orderNo}`);
+      pendingCheckouts.delete(orderNo);
+      return res.status(402).json({ error: 'Payment was not approved' });
+    }
+
+    // Mark vendor as paid in database
+    await pool.query(
+      `UPDATE vendors SET payment_status = 'paid', payment_date = NOW(), updated_date = NOW()
+       WHERE id = $1`,
+      [vendor_id]
+    ).catch(e => console.error('Vendor update error:', e.message));
+
+    // Send confirmation email
+    try {
+      const apiKey = process.env.RESEND_API_KEY;
+      const from = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+      if (apiKey && checkoutData.email) {
+        const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f5f5f4;font-family:Arial,sans-serif;">
+<div style="max-width:500px;margin:20px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+  <div style="background:#1c1917;padding:24px;text-align:center;">
+    <h1 style="margin:0;color:#facc15;font-size:24px;letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
+    <p style="margin:8px 0 0;color:#a8a29e;font-size:14px;">Vendor Registration Confirmed</p>
+  </div>
+  <div style="padding:24px;">
+    <h2 style="color:#1c1917;margin-bottom:16px;">Thank you, ${checkoutData.business_name}!</h2>
+    <p style="color:#44403c;margin-bottom:16px;">Your vendor registration and booth payment have been confirmed.</p>
+    <div style="background:#f5f5f4;border-radius:10px;padding:16px;margin-bottom:16px;">
+      <table style="width:100%;font-size:14px;color:#44403c;">
+        <tr><td style="padding:4px 0;font-weight:bold;">📅 Event</td><td>July 31 - August 2, 2026</td></tr>
+        <tr><td style="padding:4px 0;font-weight:bold;">📍 Location</td><td>588 Sideroad 10 S., Walkerton, ON</td></tr>
+        <tr><td style="padding:4px 0;font-weight:bold;">🏕️ Booth</td><td>${checkoutData.booth_size}</td></tr>
+        <tr><td style="padding:4px 0;font-weight:bold;">💳 Amount Paid</td><td style="color:#16a34a;font-weight:bold;">$${parseFloat(checkoutData.amount).toFixed(2)}</td></tr>
+        <tr><td style="padding:4px 0;font-weight:bold;">🔖 Reference</td><td>${confirmation_code}</td></tr>
+      </table>
+    </div>
+    <p style="color:#78716c;font-size:13px;">Our team will be in touch with booth assignment details closer to the event.</p>
+  </div>
+  <div style="background:#1c1917;padding:16px 24px;text-align:center;">
+    <p style="margin:0;color:#a8a29e;font-size:12px;">Questions? Email <a href="mailto:info@holmdalerodeo.ca" style="color:#facc15;">info@holmdalerodeo.ca</a></p>
+  </div>
+</div>
+</body></html>`;
+
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from,
+            to: [checkoutData.email],
+            subject: `✅ Vendor Registration Confirmed — Holmdale Pro Rodeo 2026`,
+            html
+          })
+        });
+        console.log(`✓ Vendor confirmation email sent to ${checkoutData.email}`);
+      }
+    } catch (emailErr) {
+      console.error('[Vendor Confirm] Email error:', emailErr.message);
+    }
+
+    pendingCheckouts.delete(orderNo);
+    console.log(`✓ Vendor payment confirmed: ${orderNo}`);
+    res.json({ success: true, confirmation_code });
+  } catch (error) {
+    console.error('[Vendor Confirm] Error:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 

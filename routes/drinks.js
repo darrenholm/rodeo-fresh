@@ -210,6 +210,7 @@ router.get('/admin/inventory', authenticateToken, async (req, res) => {
               total_sold, (stock_quantity - stock_remaining) as sold_percent,
               active
        FROM drinks
+       WHERE active = true
        ORDER BY total_sold DESC`
     );
     res.json(result.rows);

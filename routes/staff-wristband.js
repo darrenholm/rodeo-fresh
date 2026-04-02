@@ -16,13 +16,12 @@ function normalizeUid(uid) {
 
 // ============================================
 // GET /api/staff-wristband/:uid
-// Look up staff member by wristband UID
 // ============================================
 router.get('/:uid', async (req, res) => {
     try {
         const uid = normalizeUid(req.params.uid);
         const result = await pool.query(
-            `SELECT id, name, email, roles, drink_allowance, drinks_used, wristband_active
+            `SELECT id, fullname AS name, email, roles, drink_allowance, drinks_used, wristband_active
              FROM staff
              WHERE UPPER(rfid_uid) = $1 AND wristband_active = true`,
             [uid]
@@ -45,8 +44,6 @@ router.get('/:uid', async (req, res) => {
 
 // ============================================
 // POST /api/staff-wristband/login
-// Wristband tap replaces email/password login
-// Returns JWT token
 // ============================================
 router.post('/login', async (req, res) => {
     try {
@@ -55,7 +52,7 @@ router.post('/login', async (req, res) => {
 
         const uid = normalizeUid(rfid_uid);
         const result = await pool.query(
-            `SELECT id, name, email, roles, drink_allowance, drinks_used, wristband_active
+            `SELECT id, fullname AS name, email, roles, drink_allowance, drinks_used, wristband_active
              FROM staff
              WHERE UPPER(rfid_uid) = $1 AND wristband_active = true`,
             [uid]
@@ -92,7 +89,6 @@ router.post('/login', async (req, res) => {
 
 // ============================================
 // POST /api/staff-wristband/link
-// Link a wristband UID to a staff member
 // ============================================
 router.post('/link', authenticateToken, async (req, res) => {
     try {
@@ -103,9 +99,8 @@ router.post('/link', authenticateToken, async (req, res) => {
 
         const uid = normalizeUid(rfid_uid);
 
-        // Check if UID already assigned to someone else
         const existing = await pool.query(
-            'SELECT id, name FROM staff WHERE UPPER(rfid_uid) = $1 AND id != $2',
+            'SELECT id, fullname AS name FROM staff WHERE UPPER(rfid_uid) = $1 AND id != $2',
             [uid, staff_id]
         );
         if (existing.rows.length > 0) {
@@ -116,7 +111,7 @@ router.post('/link', authenticateToken, async (req, res) => {
 
         const result = await pool.query(
             `UPDATE staff SET rfid_uid = $1, wristband_active = true
-             WHERE id = $2 RETURNING id, name, email, rfid_uid, wristband_active`,
+             WHERE id = $2 RETURNING id, fullname AS name, email, rfid_uid, wristband_active`,
             [uid, staff_id]
         );
         if (result.rows.length === 0) {
@@ -133,7 +128,6 @@ router.post('/link', authenticateToken, async (req, res) => {
 
 // ============================================
 // POST /api/staff-wristband/unlink
-// Remove wristband from staff member
 // ============================================
 router.post('/unlink', authenticateToken, async (req, res) => {
     try {
@@ -142,7 +136,7 @@ router.post('/unlink', authenticateToken, async (req, res) => {
 
         const result = await pool.query(
             `UPDATE staff SET rfid_uid = NULL, wristband_active = false
-             WHERE id = $1 RETURNING id, name`,
+             WHERE id = $1 RETURNING id, fullname AS name`,
             [staff_id]
         );
         if (result.rows.length === 0) {
@@ -159,7 +153,6 @@ router.post('/unlink', authenticateToken, async (req, res) => {
 
 // ============================================
 // POST /api/staff-wristband/serve-drink
-// Serve a free drink to staff member
 // ============================================
 router.post('/serve-drink', authenticateToken, async (req, res) => {
     try {
@@ -170,9 +163,8 @@ router.post('/serve-drink', authenticateToken, async (req, res) => {
 
         const uid = normalizeUid(rfid_uid);
 
-        // Get staff member
         const staffResult = await pool.query(
-            `SELECT * FROM staff WHERE UPPER(rfid_uid) = $1 AND wristband_active = true`,
+            `SELECT *, fullname AS name FROM staff WHERE UPPER(rfid_uid) = $1 AND wristband_active = true`,
             [uid]
         );
         if (staffResult.rows.length === 0) {
@@ -180,7 +172,6 @@ router.post('/serve-drink', authenticateToken, async (req, res) => {
         }
         const staff = staffResult.rows[0];
 
-        // Check drink allowance
         const drinksRemaining = (staff.drink_allowance || 8) - (staff.drinks_used || 0);
         if (drinksRemaining <= 0) {
             return res.status(400).json({
@@ -190,7 +181,6 @@ router.post('/serve-drink', authenticateToken, async (req, res) => {
             });
         }
 
-        // Get drink info
         const drinkResult = await pool.query(
             'SELECT * FROM drinks WHERE id = $1 AND active = true',
             [drink_id]
@@ -204,20 +194,17 @@ router.post('/serve-drink', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Drink out of stock' });
         }
 
-        // Deduct from drink allowance
         await pool.query(
             'UPDATE staff SET drinks_used = drinks_used + 1 WHERE id = $1',
             [staff.id]
         );
 
-        // Deduct from inventory
         await pool.query(
             `UPDATE drinks SET stock_remaining = stock_remaining - 1,
              total_sold = total_sold + 1 WHERE id = $1`,
             [drink_id]
         );
 
-        // Log the drink
         const logId = `sdlog_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         await pool.query(
             `INSERT INTO staff_drink_log (id, staff_id, rfid_uid, drink_name, location, created_at)
@@ -240,7 +227,6 @@ router.post('/serve-drink', authenticateToken, async (req, res) => {
 
 // ============================================
 // POST /api/staff-wristband/log-access
-// Log door/area access event
 // ============================================
 router.post('/log-access', async (req, res) => {
     try {
@@ -251,16 +237,14 @@ router.post('/log-access', async (req, res) => {
 
         const uid = normalizeUid(rfid_uid);
 
-        // Look up staff
         const staffResult = await pool.query(
-            `SELECT id, name, roles FROM staff WHERE UPPER(rfid_uid) = $1 AND wristband_active = true`,
+            `SELECT id, fullname AS name, roles FROM staff WHERE UPPER(rfid_uid) = $1 AND wristband_active = true`,
             [uid]
         );
 
         const granted = staffResult.rows.length > 0;
         const staff = granted ? staffResult.rows[0] : null;
 
-        // Log the access attempt
         const logId = `access_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         await pool.query(
             `INSERT INTO staff_access_log (id, staff_id, rfid_uid, location, access_type, granted, created_at)
@@ -288,7 +272,6 @@ router.post('/log-access', async (req, res) => {
 
 // ============================================
 // PUT /api/staff-wristband/allowance
-// Update drink allowance for a staff member
 // ============================================
 router.put('/allowance', authenticateToken, async (req, res) => {
     try {
@@ -299,7 +282,7 @@ router.put('/allowance', authenticateToken, async (req, res) => {
 
         const result = await pool.query(
             `UPDATE staff SET drink_allowance = $1 WHERE id = $2
-             RETURNING id, name, drink_allowance, drinks_used`,
+             RETURNING id, fullname AS name, drink_allowance, drinks_used`,
             [drink_allowance, staff_id]
         );
         if (result.rows.length === 0) {
@@ -316,12 +299,11 @@ router.put('/allowance', authenticateToken, async (req, res) => {
 
 // ============================================
 // GET /api/staff-wristband/access-log/:staffId
-// Get access log for a staff member
 // ============================================
 router.get('/access-log/:staffId', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query(
-            `SELECT sal.*, s.name as staff_name
+            `SELECT sal.*, s.fullname AS staff_name
              FROM staff_access_log sal
              LEFT JOIN staff s ON sal.staff_id = s.id
              WHERE sal.staff_id = $1

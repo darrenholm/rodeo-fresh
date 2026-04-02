@@ -9,7 +9,7 @@ const pool = require('./config/database');
 // ============================================
 
 // Auth & Users
-const authRoutes = require('./routes/auth');            // Updated with roles supporth
+const authRoutes = require('./routes/auth');
 const staffAuthRoutes = require('./routes/auth-routes');
 
 // Core data
@@ -24,13 +24,15 @@ const sponsorsVendorsRoutes = require('./routes/sponsors-vendors');
 // Wristbands & Bar
 const wristbandRoutes = require('./routes/wristbands');
 const drinkRoutes = require('./routes/drinks');
+const staffWristbandRoutes = require('./routes/staff-wristband');
 
 // Shifts
 const shiftRoutes = require('./routes/shift-routes');
 const shiftsCrudRoutes = require('./routes/shifts-crud-routes');
 
 // Payments
-const monerisRoutes = require('./routes/moneris'); const stripeRoutes = require('./routes/stripe');
+const monerisRoutes = require('./routes/moneris');
+const stripeRoutes = require('./routes/stripe');
 
 // Email & Reports
 const emailRoutes = require('./routes/email');
@@ -58,9 +60,7 @@ const app = express();
 app.use(helmet());
 app.use(cors({
   origin: function(origin, callback) {
-    // Allow requests with no origin (mobile apps, Postman, local HTML files, kiosks)
     if (!origin) return callback(null, true);
-    
     const allowedOrigins = [
       'https://holmdalerodeo.ca',
       'https://www.holmdalerodeo.ca',
@@ -70,13 +70,12 @@ app.use(cors({
       'http://localhost:5173',
       'http://127.0.0.1:3000',
       'http://127.0.0.1:5173',
-      'file://'   // Android kiosk WebView
+      'file://'
     ];
-    
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      callback(null, true); // Allow all for now — tighten for production
+      callback(null, true);
     }
   },
   credentials: true
@@ -98,7 +97,7 @@ app.use((req, res, next) => {
 
 // Auth & Users
 app.use('/api/auth', authRoutes);
-app.use('/api/auth', staffAuthRoutes); 
+app.use('/api/auth', staffAuthRoutes);
 
 // Core data
 app.use('/api/staff', staffRoutes);
@@ -111,6 +110,7 @@ app.use('/api/dashboard', dashboardRoutes);
 // Wristbands & Bar
 app.use('/api/wristbands', wristbandRoutes);
 app.use('/api/drinks', drinkRoutes);
+app.use('/api/staff-wristband', staffWristbandRoutes);
 
 // Shifts
 app.use('/api/shifts', shiftRoutes);
@@ -118,42 +118,43 @@ app.use('/api/shifts-manage', shiftRoutes);
 app.use('/api/shifts-crud', shiftsCrudRoutes);
 
 // Payments
-app.use('/api/moneris', monerisRoutes); app.use('/api/stripe', stripeRoutes);
+app.use('/api/moneris', monerisRoutes);
+app.use('/api/stripe', stripeRoutes);
 
 // Email & Reports
 app.use('/api/email', emailRoutes);
 app.use('/api/reports', reportRoutes);
 
-// NEW: Booth Menu (food menu, drink menu, ticket pricing)
+// Booth Menu
 app.use('/api/booth/menu', boothMenuRoutes);
 
-// NEW: Kitchen Orders (kitchen display system)
+// Kitchen Orders
 app.use('/api/kitchen', kitchenRoutes);
 
-// NEW: Merchandise Sales (POS)
+// Merchandise Sales
 app.use('/api/merch', merchRoutes);
 
+// Sponsors & Vendors
 app.use('/api', sponsorsVendorsRoutes);
 
-// NEW: Wristband Transfer & Balance (public balance check + transfer)
+// Wristband Transfer & Balance
 app.use('/api/wristbands', wristbandTransferRoutes);
 app.use('/api/features', featureRoutes);
-
 
 // ============================================
 // HEALTH & INFO
 // ============================================
 
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV 
+    environment: process.env.NODE_ENV
   });
 });
 
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'Holmdale Rodeo API',
     version: '3.0.0',
     endpoints: {
@@ -167,6 +168,7 @@ app.get('/', (req, res) => {
       dashboard: '/api/dashboard',
       wristbands: '/api/wristbands',
       drinks: '/api/drinks',
+      staffWristband: '/api/staff-wristband',
       moneris: '/api/moneris',
       boothMenu: '/api/booth/menu',
       kitchen: '/api/kitchen/orders',
@@ -183,9 +185,9 @@ app.get('/', (req, res) => {
 // ============================================
 
 app.use((req, res) => {
-  res.status(404).json({ 
+  res.status(404).json({
     error: 'Not Found',
-    message: `Cannot ${req.method} ${req.path}` 
+    message: `Cannot ${req.method} ${req.path}`
   });
 });
 
@@ -204,14 +206,14 @@ app.use((err, req, res, next) => {
 
 (async () => {
   try {
-    // Existing migrations
     await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS is_19_plus BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS bar_credits INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'pending'`);
-    
-    // Roles migration
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS roles JSONB DEFAULT '["admin"]'`);
-    
+    await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS rfid_uid VARCHAR UNIQUE`);
+    await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS drink_allowance INTEGER DEFAULT 8`);
+    await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS drinks_used INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS wristband_active BOOLEAN DEFAULT false`);
     console.log('✓ Auto-migrations complete');
   } catch (e) {
     console.log('Migration note:', e.message);
@@ -232,16 +234,18 @@ app.listen(PORT, () => {
   console.log(`🔗 URL: http://localhost:${PORT}`);
   console.log('');
   console.log('📋 Routes loaded:');
-  console.log('   /api/auth          — login, register, roles');
-  console.log('   /api/booth/menu    — food + drink menu');
-  console.log('   /api/kitchen       — kitchen orders (KDS)');
-  console.log('   /api/merch         — merchandise POS');
-  console.log('   /api/drinks        — bar inventory & serving');
-  console.log('   /api/moneris       — payment processing');
-  console.log('   /api/wristbands    — RFID wristbands, balance, transfers');
-  console.log('   /api/ticket-orders — gate tickets');
-  console.log('   /api/products      — merchandise catalog');
-  console.log('   /api/events        — rodeo events');
+  console.log('   /api/auth              — login, register, roles');
+  console.log('   /api/booth/menu        — food + drink menu');
+  console.log('   /api/kitchen           — kitchen orders (KDS)');
+  console.log('   /api/merch             — merchandise POS');
+  console.log('   /api/drinks            — bar inventory & serving');
+  console.log('   /api/moneris           — payment processing');
+  console.log('   /api/stripe            — Stripe Terminal');
+  console.log('   /api/wristbands        — RFID wristbands, balance, transfers');
+  console.log('   /api/staff-wristband   — staff wristband login, drinks, access');
+  console.log('   /api/ticket-orders     — gate tickets');
+  console.log('   /api/products          — merchandise catalog');
+  console.log('   /api/events            — rodeo events');
   console.log('='.repeat(50));
 });
 

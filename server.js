@@ -1,4 +1,12 @@
 require('dotenv').config();
+
+// Fail fast on misconfigured deploy — better than silently signing JWTs
+// with the source-code fallback that previously lived in routes/auth-routes.js.
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable not set');
+  process.exit(1);
+}
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -28,7 +36,6 @@ const staffWristbandRoutes = require('./routes/staff-wristband');
 
 // Shifts
 const shiftRoutes = require('./routes/shift-routes');
-const shiftsCrudRoutes = require('./routes/shifts-crud-routes');
 
 // Payments
 const monerisRoutes = require('./routes/moneris');
@@ -65,7 +72,6 @@ app.use(cors({
       'https://holmdalerodeo.ca',
       'https://www.holmdalerodeo.ca',
       'https://staff.holmdalerodeo.ca',
-      'https://holmdale-pro-rodeo.base44.app',
       'http://localhost:3000',
       'http://localhost:5173',
       'http://127.0.0.1:3000',
@@ -115,7 +121,6 @@ app.use('/api/staff-wristband', staffWristbandRoutes);
 // Shifts
 app.use('/api/shifts', shiftRoutes);
 app.use('/api/shifts-manage', shiftRoutes);
-app.use('/api/shifts-crud', shiftsCrudRoutes);
 
 // Payments
 app.use('/api/moneris', monerisRoutes);

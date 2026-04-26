@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('../config/database');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'rodeo2026secret';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // ── Auth helper ──
 function requireRole(roles) {

@@ -6,7 +6,7 @@ const { Pool } = require('pg');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
-const JWT_SECRET = process.env.JWT_SECRET || 'rodeo2026secret';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // ── Resend email helper ──
 const RESEND_API_URL = 'https://api.resend.com/emails';
@@ -53,7 +53,16 @@ router.post('/staff-login', async (req, res) => {
 
     const staff = result.rows[0];
 
-    // If no password_hash yet, check against default password directly
+    // If no password_hash yet, check against default password directly.
+    //
+    // KNOWN SECURITY DEBT: as of 2026-04-26, 79 volunteer staff accounts
+    // have NULL password_hash and rely on this 'rodeo2026' fallback.
+    // Volunteers haven't started using the system yet (login window opens
+    // ~2 weeks before the event), so the active risk is currently low —
+    // BUT the fallback MUST be removed before volunteers start logging in.
+    // Approach: send password-reset links to all 79 accounts ~2.5 weeks
+    // before event start so each volunteer sets their own password.
+    // Tracked: task #29.
     if (!staff.password_hash) {
       if (password !== 'rodeo2026') {
         return res.status(401).json({ error: 'Invalid password' });

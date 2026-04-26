@@ -14,7 +14,7 @@ router.post('/refund', async (req, res) => {
   let staff;
   try {
     const jwt = require('jsonwebtoken');
-    const JWT_SECRET = process.env.JWT_SECRET || 'rodeo2026secret';
+    const JWT_SECRET = process.env.JWT_SECRET;
     staff = jwt.verify(token, JWT_SECRET);
   } catch (e) {
     return res.status(401).json({ error: 'Invalid token' });
@@ -99,7 +99,7 @@ router.get('/payment-lookup', async (req, res) => {
   let staff;
   try {
     const jwt = require('jsonwebtoken');
-    const JWT_SECRET = process.env.JWT_SECRET || 'rodeo2026secret';
+    const JWT_SECRET = process.env.JWT_SECRET;
     staff = jwt.verify(token, JWT_SECRET);
   } catch (e) {
     return res.status(401).json({ error: 'Invalid token' });

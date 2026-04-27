@@ -44,7 +44,7 @@ router.post('/connection-token', async (req, res) => {
 // ============================================
 router.post('/create-payment-intent', async (req, res) => {
   try {
-    const { amount, rfid_uid, tickets } = req.body;
+    const { amount, rfid_uid, tickets, credit_amount, metadata: clientMetadata } = req.body;
     if (!amount) return res.status(400).json({ error: 'amount required' });
 
     const paymentIntent = await stripe.paymentIntents.create({
@@ -53,9 +53,11 @@ router.post('/create-payment-intent', async (req, res) => {
       payment_method_types: ['card_present', 'interac_present'],
       capture_method: 'manual',
       metadata: {
-        rfid_uid: rfid_uid || '',
-        tickets: tickets || 0,
-        source: 'rodeo_kiosk'
+        source: 'rodeo_kiosk',
+        ...(clientMetadata || {}),
+        rfid_uid: String(rfid_uid || ''),
+        tickets: String(tickets || 0),
+        credit_amount: String(credit_amount || 0)
       }
     });
 

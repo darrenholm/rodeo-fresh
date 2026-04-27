@@ -189,28 +189,30 @@ router.post('/redeem', authenticateToken, async (req, res) => {
     }
 
     const uid = normalizeUid(rfid_uid);
-    const wristbandResult = await pool.query(
-      'SELECT * FROM wristbands WHERE UPPER(rfid_uid) = $1',
-      [uid]
-    );
-    if (wristbandResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Wristband not found' });
-    }
-    const wristband = wristbandResult.rows[0];
-
-    if (!wristband.alcohol_approved) {
-      return res.status(403).json({ error: 'Not approved for alcohol' });
-    }
-    if (wristband.credits < amount) {
-      return res.status(400).json({ error: 'Insufficient credits', available: wristband.credits, required: amount });
-    }
 
     const result = await pool.query(
-      `UPDATE wristbands 
+      `UPDATE wristbands
        SET credits = credits - $1, credits_spent = credits_spent + $1
-       WHERE UPPER(rfid_uid) = $2 RETURNING *`,
+       WHERE UPPER(rfid_uid) = $2 AND alcohol_approved = true AND credits >= $1
+       RETURNING *`,
       [amount, uid]
     );
+
+    if (result.rowCount === 0) {
+      const check = await pool.query(
+        'SELECT alcohol_approved, credits FROM wristbands WHERE UPPER(rfid_uid) = $1',
+        [uid]
+      );
+      if (check.rows.length === 0) {
+        return res.status(404).json({ error: 'Wristband not found' });
+      }
+      if (!check.rows[0].alcohol_approved) {
+        return res.status(403).json({ error: 'Not approved for alcohol' });
+      }
+      return res.status(400).json({ error: 'Insufficient credits', available: check.rows[0].credits, required: amount });
+    }
+
+    const wristband = result.rows[0];
 
     const transactionId = `transaction_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     await pool.query(
@@ -219,8 +221,8 @@ router.post('/redeem', authenticateToken, async (req, res) => {
       [transactionId, wristband.id, amount, req.user.email]
     );
 
-    console.log(`✓ Drink served: ${uid} -$${amount}, balance: $${result.rows[0].credits}`);
-    res.json({ success: true, wristband: result.rows[0], new_balance: result.rows[0].credits, message: 'Drink served successfully' });
+    console.log(`✓ Drink served: ${uid} -$${amount}, balance: $${wristband.credits}`);
+    res.json({ success: true, wristband, new_balance: wristband.credits, message: 'Drink served successfully' });
 
   } catch (error) {
     console.error('Error redeeming drink:', error);
@@ -247,20 +249,20 @@ router.get('/', authenticateToken, async (req, res) => {
 // POST cancel/refund a drink (Bar)
 router.post('/cancel-drink', authenticateToken, async (req, res) => {
   try {
-    const { rfid_uid } = req.body;
+    const { rfid_uid, amount = 7 } = req.body;
     if (!rfid_uid) return res.status(400).json({ error: 'Missing rfid_uid' });
 
     const uid = normalizeUid(rfid_uid);
     const result = await pool.query(
-      `UPDATE wristbands 
-       SET credits = credits + 7,
-           credits_spent = GREATEST(0, credits_spent - 7)
-       WHERE UPPER(rfid_uid) = $1 RETURNING *`,
-      [uid]
+      `UPDATE wristbands
+       SET credits = credits + $1,
+           credits_spent = GREATEST(0, credits_spent - $1)
+       WHERE UPPER(rfid_uid) = $2 RETURNING *`,
+      [amount, uid]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Wristband not found' });
 
-    console.log(`✓ Drink cancelled: ${uid} +$7`);
+    console.log(`✓ Drink cancelled: ${uid} +$${amount}`);
     res.json({ success: true, wristband: result.rows[0] });
 
   } catch (error) {

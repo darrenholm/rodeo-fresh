@@ -172,15 +172,6 @@ router.post('/serve-drink', authenticateToken, async (req, res) => {
         }
         const staff = staffResult.rows[0];
 
-        const drinksRemaining = (staff.drink_allowance || 8) - (staff.drinks_used || 0);
-        if (drinksRemaining <= 0) {
-            return res.status(400).json({
-                error: 'Staff drink allowance exhausted',
-                drinks_used: staff.drinks_used,
-                drink_allowance: staff.drink_allowance
-            });
-        }
-
         const drinkResult = await pool.query(
             'SELECT * FROM drinks WHERE id = $1 AND active = true',
             [drink_id]
@@ -194,10 +185,20 @@ router.post('/serve-drink', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Drink out of stock' });
         }
 
-        await pool.query(
-            'UPDATE staff SET drinks_used = drinks_used + 1 WHERE id = $1',
-            [staff.id]
+        const allowanceUpdate = await pool.query(
+            `UPDATE staff SET drinks_used = drinks_used + $1
+             WHERE id = $2 AND (drink_allowance - drinks_used) >= $1
+             RETURNING drink_allowance, drinks_used`,
+            [drink.price, staff.id]
         );
+        if (allowanceUpdate.rowCount === 0) {
+            return res.status(400).json({
+                error: 'Staff drink allowance insufficient',
+                drinks_used: staff.drinks_used,
+                drink_allowance: staff.drink_allowance,
+                drink_price: drink.price
+            });
+        }
 
         await pool.query(
             `UPDATE drinks SET stock_remaining = stock_remaining - 1,
@@ -212,12 +213,14 @@ router.post('/serve-drink', authenticateToken, async (req, res) => {
             [logId, staff.id, uid, drink.name]
         );
 
-        console.log(`✓ Staff drink: ${drink.name} → ${staff.name} (${drinksRemaining - 1} remaining)`);
+        const updated = allowanceUpdate.rows[0];
+        const drinksRemaining = Math.max(0, updated.drink_allowance - updated.drinks_used);
+        console.log(`✓ Staff drink: ${drink.name} ($${drink.price}) → ${staff.name} ($${drinksRemaining} remaining)`);
         res.json({
             success: true,
             drink: drink.name,
             staff_name: staff.name,
-            drinks_remaining: drinksRemaining - 1
+            drinks_remaining: drinksRemaining
         });
     } catch (error) {
         console.error('Staff serve drink error:', error);

@@ -78,11 +78,12 @@ router.post('/capture-payment', async (req, res) => {
     const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
     const rfidUid = paymentIntent.metadata?.rfid_uid;
     const tickets = parseInt(paymentIntent.metadata?.tickets || 0);
-    const amount = tickets * 7;
+    const creditAmountCents = parseInt(paymentIntent.metadata?.credit_amount || 0);
+    const amount = creditAmountCents > 0 ? creditAmountCents / 100 : tickets * 7;
 
     if (paymentIntent.status === 'requires_capture') {
       await stripe.paymentIntents.capture(payment_intent_id);
-      console.log(`[Stripe Terminal] Payment captured: ${payment_intent_id} rfid=${rfidUid} tickets=${tickets}`);
+      console.log(`[Stripe Terminal] Payment captured: ${payment_intent_id} rfid=${rfidUid} amount=$${amount}`);
     } else {
       console.log(`[Stripe Terminal] Payment already captured: ${payment_intent_id}`);
     }
@@ -98,15 +99,15 @@ router.post('/capture-payment', async (req, res) => {
       console.error('[Stripe] Failed to save payment record:', e.message);
     }
 
-    if (rfidUid && tickets > 0) {
+    if (rfidUid && amount > 0) {
       await pool.query(
         'UPDATE wristbands SET credits = credits + $1 WHERE UPPER(rfid_uid) = $2',
         [amount, rfidUid.toUpperCase()]
       );
-      console.log(`✓ Stripe Terminal: Added ${tickets} tickets ($${amount}) to wristband ${rfidUid}`);
+      console.log(`✓ Stripe Terminal: Added $${amount} to wristband ${rfidUid}`);
     }
 
-    res.json({ success: true, tickets, rfid_uid: rfidUid });
+    res.json({ success: true, tickets, amount, rfid_uid: rfidUid });
   } catch (error) {
     console.error('[Stripe Terminal] Capture error:', error.message);
     res.status(500).json({ error: error.message });
@@ -279,15 +280,16 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     const pi = event.data.object;
     const rfidUid = pi.metadata?.rfid_uid;
     const tickets = parseInt(pi.metadata?.tickets || 0);
-    const amount = tickets * 7;
+    const creditAmountCents = parseInt(pi.metadata?.credit_amount || 0);
+    const amount = creditAmountCents > 0 ? creditAmountCents / 100 : tickets * 7;
 
-    if (rfidUid && tickets > 0) {
+    if (rfidUid && amount > 0) {
       try {
         await pool.query(
           'UPDATE wristbands SET credits = credits + $1 WHERE UPPER(rfid_uid) = $2',
           [amount, rfidUid.toUpperCase()]
         );
-        console.log(`✓ Stripe Webhook: Added ${tickets} tickets to wristband ${rfidUid}`);
+        console.log(`✓ Stripe Webhook: Added $${amount} to wristband ${rfidUid}`);
       } catch (err) {
         console.error('[Stripe Webhook] DB error:', err.message);
       }

@@ -180,20 +180,28 @@ router.post('/add-credits', authenticateToken, async (req, res) => {
   }
 });
 
-// POST redeem drink (Bar)
+// POST redeem credits (Bar / Food / Merch)
 router.post('/redeem', authenticateToken, async (req, res) => {
   try {
-    const { rfid_uid, amount = 7.00 } = req.body;
+    const { rfid_uid, amount = 7.00, category = 'drink', description } = req.body;
     if (!rfid_uid) {
       return res.status(400).json({ error: 'Missing rfid_uid' });
     }
+
+    const VALID_CATEGORIES = ['drink', 'food', 'merch', 'other'];
+    if (!VALID_CATEGORIES.includes(category)) {
+      return res.status(400).json({ error: 'Invalid category' });
+    }
+
+    const requireAlcoholApproved = category === 'drink';
+    const alcoholClause = requireAlcoholApproved ? 'AND alcohol_approved = true' : '';
 
     const uid = normalizeUid(rfid_uid);
 
     const result = await pool.query(
       `UPDATE wristbands
        SET credits = credits - $1, credits_spent = credits_spent + $1
-       WHERE UPPER(rfid_uid) = $2 AND alcohol_approved = true AND credits >= $1
+       WHERE UPPER(rfid_uid) = $2 ${alcoholClause} AND credits >= $1
        RETURNING *`,
       [amount, uid]
     );
@@ -206,7 +214,7 @@ router.post('/redeem', authenticateToken, async (req, res) => {
       if (check.rows.length === 0) {
         return res.status(404).json({ error: 'Wristband not found' });
       }
-      if (!check.rows[0].alcohol_approved) {
+      if (requireAlcoholApproved && !check.rows[0].alcohol_approved) {
         return res.status(403).json({ error: 'Not approved for alcohol' });
       }
       return res.status(400).json({ error: 'Insufficient credits', available: check.rows[0].credits, required: amount });
@@ -214,19 +222,27 @@ router.post('/redeem', authenticateToken, async (req, res) => {
 
     const wristband = result.rows[0];
 
+    const DEFAULT_DESCRIPTIONS = {
+      drink: 'Drink served',
+      food:  'Food purchased',
+      merch: 'Merch purchased',
+      other: 'Credit redeemed',
+    };
+    const txnDescription = description || DEFAULT_DESCRIPTIONS[category];
+
     const transactionId = `transaction_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     await pool.query(
       `INSERT INTO bar_transactions (id, wristband_id, amount, transaction_type, description, created_by)
-       VALUES ($1, $2, $3, 'drink', 'Drink served', $4)`,
-      [transactionId, wristband.id, amount, req.user.email]
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [transactionId, wristband.id, amount, category, txnDescription, req.user.email]
     );
 
-    console.log(`✓ Drink served: ${uid} -$${amount}, balance: $${wristband.credits}`);
-    res.json({ success: true, wristband, new_balance: wristband.credits, message: 'Drink served successfully' });
+    console.log(`✓ ${category} redeemed: ${uid} -$${amount}, balance: $${wristband.credits}`);
+    res.json({ success: true, wristband, new_balance: wristband.credits, message: 'Redeemed successfully' });
 
   } catch (error) {
-    console.error('Error redeeming drink:', error);
-    res.status(500).json({ error: 'Failed to redeem drink' });
+    console.error('Error redeeming:', error);
+    res.status(500).json({ error: 'Failed to redeem' });
   }
 });
 

@@ -231,6 +231,67 @@ router.post('/serve-drink', authenticateToken, async (req, res) => {
 });
 
 // ============================================
+// POST /api/staff-wristband/cancel-drink
+// ============================================
+router.post('/cancel-drink', authenticateToken, async (req, res) => {
+    try {
+        const { rfid_uid, drink_id, log_id } = req.body;
+        if (!rfid_uid || !drink_id) {
+            return res.status(400).json({ error: 'rfid_uid and drink_id required' });
+        }
+
+        const uid = normalizeUid(rfid_uid);
+
+        const staffResult = await pool.query(
+            `SELECT id, fullname AS name FROM staff WHERE UPPER(rfid_uid) = $1 AND wristband_active = true`,
+            [uid]
+        );
+        if (staffResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff wristband not found' });
+        }
+        const staff = staffResult.rows[0];
+
+        const drinkResult = await pool.query(
+            'SELECT * FROM drinks WHERE id = $1',
+            [drink_id]
+        );
+        if (drinkResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Drink not found' });
+        }
+        const drink = drinkResult.rows[0];
+
+        const allowanceUpdate = await pool.query(
+            `UPDATE staff SET drinks_used = GREATEST(0, drinks_used - $1)
+             WHERE id = $2 RETURNING drink_allowance, drinks_used`,
+            [drink.price, staff.id]
+        );
+
+        await pool.query(
+            `UPDATE drinks SET stock_remaining = stock_remaining + 1,
+             total_sold = GREATEST(0, total_sold - 1) WHERE id = $1`,
+            [drink_id]
+        );
+
+        if (log_id) {
+            await pool.query('DELETE FROM staff_drink_log WHERE id = $1', [log_id]);
+        }
+
+        const updated = allowanceUpdate.rows[0];
+        console.log(`✓ Staff drink cancelled: ${drink.name} ($${drink.price}) → ${staff.name}`);
+        res.json({
+            success: true,
+            drink: drink.name,
+            staff_name: staff.name,
+            drink_allowance: updated.drink_allowance,
+            drinks_used: updated.drinks_used
+        });
+    } catch (error) {
+        console.error('Staff cancel drink error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================
 // POST /api/staff-wristband/log-access
 // ============================================
 router.post('/log-access', async (req, res) => {

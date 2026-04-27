@@ -220,7 +220,9 @@ router.post('/serve-drink', authenticateToken, async (req, res) => {
             success: true,
             drink: drink.name,
             staff_name: staff.name,
-            drinks_remaining: drinksRemaining
+            drinks_remaining: drinksRemaining,
+            drink_allowance: updated.drink_allowance,
+            drinks_used: updated.drinks_used
         });
     } catch (error) {
         console.error('Staff serve drink error:', error);

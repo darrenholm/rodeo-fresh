@@ -4,6 +4,7 @@ const pool = require('../config/database');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET;
+const { authenticateToken } = require('../middleware/auth');
 
 // ── Auth helper ──
 function requireRole(roles) {
@@ -42,7 +43,7 @@ router.post('/connection-token', async (req, res) => {
 // ============================================
 // POST /api/stripe/create-payment-intent
 // ============================================
-router.post('/create-payment-intent', async (req, res) => {
+router.post('/create-payment-intent', authenticateToken, async (req, res) => {
   try {
     const { amount, rfid_uid, tickets, credit_amount, metadata: clientMetadata } = req.body;
     if (!amount) return res.status(400).json({ error: 'amount required' });
@@ -72,7 +73,7 @@ router.post('/create-payment-intent', async (req, res) => {
 // ============================================
 // POST /api/stripe/capture-payment
 // ============================================
-router.post('/capture-payment', async (req, res) => {
+router.post('/capture-payment', authenticateToken, async (req, res) => {
   try {
     const { payment_intent_id } = req.body;
     if (!payment_intent_id) return res.status(400).json({ error: 'payment_intent_id required' });

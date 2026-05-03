@@ -307,6 +307,7 @@ app.listen(PORT, () => {
   console.log('   /api/vendors           — vendors CRUD + public registration');
   console.log('   /api/sponsor-logos     — sponsor logo uploads (Vercel Blob)');
   console.log('   /api/vendor-logos      — vendor logo uploads (Vercel Blob)');
+  console.log(`[blob] Token loaded: ${(process.env.BLOB_READ_WRITE_TOKEN || 'MISSING').slice(0, 25)}...`);
   console.log('='.repeat(50));
 });
 

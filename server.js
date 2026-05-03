@@ -219,6 +219,54 @@ app.use((err, req, res, next) => {
     await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS drink_allowance INTEGER DEFAULT 8`);
     await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS drinks_used INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS wristband_active BOOLEAN DEFAULT false`);
+
+    // Sponsor/vendor logo support — see migrations/002_sponsor_vendor_logos.sql
+    // TODO: move to a real migration tool; mirroring SQL here for Railway auto-deploy.
+    await pool.query(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`);
+    await pool.query(`ALTER TABLE vendors  ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sponsors_user_id ON sponsors(user_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_vendors_user_id  ON vendors(user_id)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sponsor_logos (
+        id            SERIAL PRIMARY KEY,
+        sponsor_id    INTEGER NOT NULL REFERENCES sponsors(id) ON DELETE CASCADE,
+        blob_url      TEXT NOT NULL,
+        filename      VARCHAR(500) NOT NULL,
+        extension     VARCHAR(20),
+        format        VARCHAR(10) NOT NULL CHECK (format IN ('vector', 'bitmap')),
+        variant       VARCHAR(20) CHECK (variant IS NULL OR variant IN ('full-color', 'black', 'white', 'icon')),
+        is_primary    BOOLEAN NOT NULL DEFAULT false,
+        size_bytes    BIGINT,
+        notes         TEXT,
+        uploaded_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sponsor_logos_sponsor ON sponsor_logos(sponsor_id)`);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sponsor_logos_one_primary ON sponsor_logos(sponsor_id) WHERE is_primary`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vendor_logos (
+        id            SERIAL PRIMARY KEY,
+        vendor_id     INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+        blob_url      TEXT NOT NULL,
+        filename      VARCHAR(500) NOT NULL,
+        extension     VARCHAR(20),
+        format        VARCHAR(10) NOT NULL CHECK (format IN ('vector', 'bitmap')),
+        variant       VARCHAR(20) CHECK (variant IS NULL OR variant IN ('full-color', 'black', 'white', 'icon')),
+        is_primary    BOOLEAN NOT NULL DEFAULT false,
+        size_bytes    BIGINT,
+        notes         TEXT,
+        uploaded_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_vendor_logos_vendor ON vendor_logos(vendor_id)`);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vendor_logos_one_primary ON vendor_logos(vendor_id) WHERE is_primary`);
+
     console.log('✓ Auto-migrations complete');
   } catch (e) {
     console.log('Migration note:', e.message);

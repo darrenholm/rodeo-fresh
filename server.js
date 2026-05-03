@@ -28,6 +28,8 @@ const productRoutes = require('./routes/products');
 const orderRoutes = require('./routes/orders');
 const dashboardRoutes = require('./routes/dashboard');
 const sponsorsVendorsRoutes = require('./routes/sponsors-vendors');
+const sponsorLogosRoutes = require('./routes/sponsorLogos');
+const vendorLogosRoutes = require('./routes/vendorLogos');
 
 // Wristbands & Bar
 const wristbandRoutes = require('./routes/wristbands');
@@ -141,6 +143,8 @@ app.use('/api/merch', merchRoutes);
 
 // Sponsors & Vendors
 app.use('/api', sponsorsVendorsRoutes);
+app.use('/api/sponsor-logos', sponsorLogosRoutes);
+app.use('/api/vendor-logos', vendorLogosRoutes);
 
 // Wristband Transfer & Balance
 app.use('/api/wristbands', wristbandTransferRoutes);
@@ -299,6 +303,10 @@ app.listen(PORT, () => {
   console.log('   /api/ticket-orders     — gate tickets');
   console.log('   /api/products          — merchandise catalog');
   console.log('   /api/events            — rodeo events');
+  console.log('   /api/sponsors          — sponsors CRUD');
+  console.log('   /api/vendors           — vendors CRUD + public registration');
+  console.log('   /api/sponsor-logos     — sponsor logo uploads (Vercel Blob)');
+  console.log('   /api/vendor-logos      — vendor logo uploads (Vercel Blob)');
   console.log('='.repeat(50));
 });
 

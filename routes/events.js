@@ -55,18 +55,44 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
 
 // PUT update event
 router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
-  const { title, date, time, description, image_url, venue, general_price, vip_price, general_available, vip_available, is_featured } = req.body;
+  const {
+    title, date, time, description, image_url, venue,
+    general_price, vip_price, general_available, vip_available, is_featured,
+    tier1_quantity, tier1_adult_price, tier1_family_price,
+    tier2_quantity, tier2_adult_price, tier2_family_price,
+    tier3_quantity, tier3_adult_price, tier3_family_price
+  } = req.body;
   try {
     const result = await pool.query(
-      `UPDATE events SET title = $1, date = $2, time = $3, description = $4, image_url = $5, venue = $6, general_price = $7, vip_price = $8, general_available = $9, vip_available = $10, is_featured = $11, updated_date = NOW()
-       WHERE id = $12 RETURNING *`,
-      [title, date, time, description, image_url, venue, general_price, vip_price, general_available, vip_available, is_featured, req.params.id]
+      `UPDATE events SET
+         title = $1, date = $2, time = $3, description = $4, image_url = $5, venue = $6,
+         general_price = $7, vip_price = $8, general_available = $9, vip_available = $10, is_featured = $11,
+         tier1_quantity = COALESCE($12, tier1_quantity),
+         tier1_adult_price = COALESCE($13, tier1_adult_price),
+         tier1_family_price = COALESCE($14, tier1_family_price),
+         tier2_quantity = COALESCE($15, tier2_quantity),
+         tier2_adult_price = COALESCE($16, tier2_adult_price),
+         tier2_family_price = COALESCE($17, tier2_family_price),
+         tier3_quantity = COALESCE($18, tier3_quantity),
+         tier3_adult_price = COALESCE($19, tier3_adult_price),
+         tier3_family_price = COALESCE($20, tier3_family_price),
+         updated_date = NOW()
+       WHERE id = $21 RETURNING *`,
+      [
+        title, date, time, description, image_url, venue,
+        general_price, vip_price, general_available, vip_available, is_featured,
+        tier1_quantity, tier1_adult_price, tier1_family_price,
+        tier2_quantity, tier2_adult_price, tier2_family_price,
+        tier3_quantity, tier3_adult_price, tier3_family_price,
+        req.params.id
+      ]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Event not found' });
     }
     res.json(result.rows[0]);
   } catch (error) {
+    console.error('Error updating event:', error);
     res.status(500).json({ error: 'Failed to update event' });
   }
 });

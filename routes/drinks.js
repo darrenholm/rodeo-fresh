@@ -148,6 +148,48 @@ router.post('/serve', authenticateToken, async (req, res) => {
   }
 });
 
+// PUT update drink name and/or price (admin only)
+router.put('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, price } = req.body;
+    if (name === undefined && price === undefined) {
+      return res.status(400).json({ error: 'Provide name and/or price to update' });
+    }
+    const setClauses = [];
+    const params = [];
+    let p = 1;
+    if (name !== undefined) {
+      if (!String(name).trim()) {
+        return res.status(400).json({ error: 'Name cannot be empty' });
+      }
+      setClauses.push(`name = $${p++}`);
+      params.push(String(name).trim());
+    }
+    if (price !== undefined) {
+      const priceNum = parseFloat(price);
+      if (isNaN(priceNum) || priceNum < 0) {
+        return res.status(400).json({ error: 'Price must be a non-negative number' });
+      }
+      setClauses.push(`price = $${p++}`);
+      params.push(priceNum);
+    }
+    params.push(id);
+    const result = await pool.query(
+      `UPDATE drinks SET ${setClauses.join(', ')} WHERE id = $${p} RETURNING *`,
+      params
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Drink not found' });
+    }
+    console.log(`✓ Drink updated: ${result.rows[0].name} (price $${result.rows[0].price})`);
+    res.json({ success: true, drink: result.rows[0] });
+  } catch (error) {
+    console.error('Error updating drink:', error);
+    res.status(500).json({ error: 'Failed to update drink' });
+  }
+});
+
 // PUT update drink inventory (admin only)
 router.put('/:id/stock', authenticateToken, async (req, res) => {
   try {

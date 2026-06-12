@@ -10,14 +10,14 @@ const QRCode = require('qrcode'); // ← ADD THIS to package.json: npm install q
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
 
-async function sendEmail({ to, subject, html, reply_to, attachments }) {
+async function sendEmail({ to, subject, html, reply_to, attachments, from: fromOverride }) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.error('✗ RESEND_API_KEY not set');
     throw new Error('Email service not configured');
   }
 
-  const from = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+  const from = fromOverride || process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 
   const payload = { from, to: [to], subject, html };
   if (reply_to) payload.reply_to = reply_to;
@@ -401,7 +401,7 @@ function priorYearsPhrase(years) {
 
 router.post('/sponsor-outreach', authenticateToken, async (req, res) => {
   try {
-    const { sponsor_ids, outreach_year, attachment, reply_to, dry_run } = req.body;
+    const { sponsor_ids, outreach_year, attachment, reply_to, dry_run, from } = req.body;
     if (!Array.isArray(sponsor_ids) || sponsor_ids.length === 0) {
       return res.status(400).json({ error: 'sponsor_ids must be a non-empty array' });
     }
@@ -467,6 +467,7 @@ router.post('/sponsor-outreach', authenticateToken, async (req, res) => {
           to: sponsor.email,
           subject,
           html,
+          from: from || undefined,
           reply_to: reply_to || undefined,
           attachments: resendAttachments
         });

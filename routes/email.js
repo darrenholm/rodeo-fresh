@@ -10,7 +10,7 @@ const QRCode = require('qrcode'); // ← ADD THIS to package.json: npm install q
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
 
-async function sendEmail({ to, subject, html }) {
+async function sendEmail({ to, subject, html, reply_to, attachments }) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.error('✗ RESEND_API_KEY not set');
@@ -19,13 +19,17 @@ async function sendEmail({ to, subject, html }) {
 
   const from = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 
+  const payload = { from, to: [to], subject, html };
+  if (reply_to) payload.reply_to = reply_to;
+  if (Array.isArray(attachments) && attachments.length) payload.attachments = attachments;
+
   const response = await fetch(RESEND_API_URL, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ from, to: [to], subject, html })
+    body: JSON.stringify(payload)
   });
 
   const data = await response.json();
@@ -331,6 +335,170 @@ router.post('/vendor-invite', authenticateToken, async (req, res) => {
     res.json({ success: true, message: `Invitation sent to ${to}` });
   } catch (error) {
     console.error('Vendor invite error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// SPONSOR OUTREACH
+// POST /api/email/sponsor-outreach
+// Body: {
+//   sponsor_ids: [number],
+//   outreach_year: number,
+//   attachment: { filename: string, content_base64: string } | null,
+//   reply_to: string,
+//   dry_run: boolean
+// }
+// Returns: { sent: [{sponsor_id, email, status: 'ok'|'error'|'skipped', message, resend_id?}], ... }
+// ============================================
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function buildSponsorOutreachHtml({ contact_first_name, sponsor_name, prior_years_phrase }) {
+  // greeting line
+  const greeting = contact_first_name
+    ? `Hi ${escapeHtml(contact_first_name)},`
+    : `Hello ${escapeHtml(sponsor_name)} team,`;
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#222;max-width:640px;margin:0 auto;padding:24px;line-height:1.55;font-size:15px;">
+
+  <p>${greeting}</p>
+
+  <p>We hope you and the team at <strong>${escapeHtml(sponsor_name)}</strong> are doing well. As we get ready for the 2026 Holmdale Pro Rodeo (July 31 – August 2), we wanted to reach out personally — your support in ${escapeHtml(prior_years_phrase)} meant a lot to us, and the event simply wouldn't be what it is without partners like you.</p>
+
+  <p>This year is shaping up to be our biggest yet. A few highlights we're excited about:</p>
+
+  <ul style="padding-left:20px;">
+    <li style="margin-bottom:10px;"><strong>A new 140' × 70' permanent building with a covered patio</strong> is going up on the rodeo grounds right now — it'll house a full commercial kitchen, bar facilities, and our mechanical bull, giving us an enhanced venue for the event.</li>
+    <li style="margin-bottom:10px;"><strong>High School Rodeo in the afternoon</strong> has been added Saturday and Sunday at 2 PM, expanding the weekend and bringing the next generation of cowboys and cowgirls to the arena.</li>
+    <li style="margin-bottom:10px;"><strong>VIP box seats</strong> debuting this year, right above the chutes — an extraordinary up-close view of the action that we think sponsors and their guests are going to love.</li>
+  </ul>
+
+  <p>We're putting the final touches on this year's program and wanted to make sure you had a chance to look at the sponsorship opportunities before things fill up. The attached booklet walks through the available levels and what's included at each one. Whether you'd like to renew at the same level or explore something different, we'd love to hear from you.</p>
+
+  <p>If you have any questions or want to talk through what makes sense for <strong>${escapeHtml(sponsor_name)}</strong> this year, just hit reply or give one of us a shout.</p>
+
+  <p>Thanks again for being part of the Holmdale story. We can't wait to see you in the stands — or in one of those VIP boxes — this summer.</p>
+
+  <p style="margin-top:24px;">All the best,<br>
+  <strong>Todd &amp; Darren Holm</strong><br>
+  <span style="color:#888;">Holmdale Pro Rodeo</span></p>
+
+</body></html>`;
+}
+
+function priorYearsPhrase(years) {
+  const sorted = [...new Set(years.map(Number))].filter(y => !isNaN(y)).sort((a,b) => a - b);
+  if (!sorted.length) return 'past years';
+  if (sorted.length === 1) return String(sorted[0]);
+  if (sorted.length === 2) return `${sorted[0]} and ${sorted[1]}`;
+  return `${sorted.slice(0, -1).join(', ')}, and ${sorted[sorted.length - 1]}`;
+}
+
+router.post('/sponsor-outreach', authenticateToken, async (req, res) => {
+  try {
+    const { sponsor_ids, outreach_year, attachment, reply_to, dry_run } = req.body;
+    if (!Array.isArray(sponsor_ids) || sponsor_ids.length === 0) {
+      return res.status(400).json({ error: 'sponsor_ids must be a non-empty array' });
+    }
+    const year = parseInt(outreach_year, 10) || new Date().getFullYear();
+
+    // Build attachment array once if provided (Resend wants {filename, content})
+    let resendAttachments = null;
+    if (attachment && attachment.content_base64) {
+      resendAttachments = [{
+        filename: attachment.filename || 'sponsorship-booklet.pdf',
+        content: attachment.content_base64
+      }];
+    }
+
+    const subject = `Holmdale Pro Rodeo ${year} — We'd love to have you back`;
+    const results = [];
+
+    for (const id of sponsor_ids) {
+      // Fetch sponsor + prior years
+      const sponsorResult = await pool.query('SELECT * FROM sponsors WHERE id = $1', [id]);
+      if (sponsorResult.rows.length === 0) {
+        results.push({ sponsor_id: id, status: 'error', message: 'Sponsor not found' });
+        continue;
+      }
+      const sponsor = sponsorResult.rows[0];
+
+      if (!sponsor.email) {
+        results.push({ sponsor_id: id, sponsor_name: sponsor.name, status: 'skipped', message: 'No email on file' });
+        continue;
+      }
+
+      const schedResult = await pool.query(
+        `SELECT year FROM sponsor_schedule WHERE sponsor_id = $1 AND amount > 0 AND year < $2 ORDER BY year`,
+        [id, year]
+      );
+      const priorYears = schedResult.rows.map(r => r.year);
+      const prior_years_phrase = priorYearsPhrase(priorYears);
+
+      // Extract first name from contact_name (handles "First Last", "First", or blank)
+      const contact_first_name = (sponsor.contact_name || '').trim().split(/\s+/)[0] || '';
+
+      const html = buildSponsorOutreachHtml({
+        contact_first_name,
+        sponsor_name: sponsor.name || sponsor.contact_name || 'there',
+        prior_years_phrase
+      });
+
+      if (dry_run) {
+        results.push({
+          sponsor_id: id,
+          sponsor_name: sponsor.name,
+          email: sponsor.email,
+          status: 'dry_run',
+          message: 'Would send',
+          preview_subject: subject,
+          preview_prior_years: prior_years_phrase
+        });
+        continue;
+      }
+
+      try {
+        const sendResult = await sendEmail({
+          to: sponsor.email,
+          subject,
+          html,
+          reply_to: reply_to || undefined,
+          attachments: resendAttachments
+        });
+        results.push({
+          sponsor_id: id,
+          sponsor_name: sponsor.name,
+          email: sponsor.email,
+          status: 'ok',
+          resend_id: sendResult.id
+        });
+      } catch (err) {
+        results.push({
+          sponsor_id: id,
+          sponsor_name: sponsor.name,
+          email: sponsor.email,
+          status: 'error',
+          message: err.message
+        });
+      }
+    }
+
+    const summary = {
+      total: results.length,
+      sent: results.filter(r => r.status === 'ok').length,
+      skipped: results.filter(r => r.status === 'skipped').length,
+      errors: results.filter(r => r.status === 'error').length,
+      dry_run: results.filter(r => r.status === 'dry_run').length
+    };
+
+    res.json({ summary, results });
+  } catch (error) {
+    console.error('Sponsor outreach error:', error);
     res.status(500).json({ error: error.message });
   }
 });

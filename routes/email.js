@@ -457,7 +457,8 @@ router.post('/sponsor-outreach', authenticateToken, async (req, res) => {
           status: 'dry_run',
           message: 'Would send',
           preview_subject: subject,
-          preview_prior_years: prior_years_phrase
+          preview_prior_years: prior_years_phrase,
+          preview_html: html
         });
         continue;
       }

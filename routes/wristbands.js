@@ -298,7 +298,7 @@ router.get('/balance/:uid', async (req, res) => {
   try {
     const uid = normalizeUid(req.params.uid);
     const result = await pool.query(
-      'SELECT rfid_uid, customer_name, credits, credits_spent, alcohol_approved FROM wristbands WHERE UPPER(rfid_uid) = $1',
+      'SELECT rfid_uid, customer_name, credits, credits_spent, alcohol_approved, badge_type, unlimited, area_access FROM wristbands WHERE UPPER(rfid_uid) = $1',
       [uid]
     );
     if (result.rows.length === 0) {

@@ -36,6 +36,9 @@ const wristbandRoutes = require('./routes/wristbands');
 const drinkRoutes = require('./routes/drinks');
 const staffWristbandRoutes = require('./routes/staff-wristband');
 
+// VIP / Volunteer / Sponsor name-tag badges (printed NFC cards)
+const badgeRoutes = require('./routes/badges');
+
 // Shifts
 const shiftRoutes = require('./routes/shift-routes');
 
@@ -119,6 +122,9 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/wristbands', wristbandRoutes);
 app.use('/api/drinks', drinkRoutes);
 app.use('/api/staff-wristband', staffWristbandRoutes);
+
+// Badges (VIP / Volunteer / Sponsor printed NFC name tags)
+app.use('/api/badges', badgeRoutes);
 
 // Shifts
 app.use('/api/shifts', shiftRoutes);
@@ -223,6 +229,69 @@ app.use((err, req, res, next) => {
     await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS drink_allowance INTEGER DEFAULT 8`);
     await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS drinks_used INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS wristband_active BOOLEAN DEFAULT false`);
+
+    // Sponsor / vendor payment flags (record-level)
+    await pool.query(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS paid BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS in_kind BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS paid BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS in_kind BOOLEAN DEFAULT false`);
+
+    // ── VIP / Volunteer / Sponsor name-tag badges ──
+    // Badges live in the wristbands table so they instantly work at the
+    // existing bar (/drinks/serve), food kiosk (/wristbands/redeem) and
+    // balance checker — all keyed on rfid_uid. A normal customer wristband
+    // has badge_type = NULL; a printed name tag sets it to vip/sponsor/volunteer.
+    // "Unlimited" badges are flagged AND given a large sentinel credit balance
+    // so every existing credit-decrementing path serves them without changes.
+    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS badge_type VARCHAR(20)`);     // vip | sponsor | volunteer | NULL
+    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS tier VARCHAR(50)`);            // e.g. Gold, Silver, Gate Captain
+    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS title VARCHAR(255)`);          // line printed under the name
+    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS company VARCHAR(255)`);        // sponsor org / department
+    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS company_logo_url TEXT`);       // sponsor's primary logo (shown on sponsor/VIP cards)
+    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS photo_url TEXT`);              // Vercel Blob URL
+    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS unlimited BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS area_access BOOLEAN DEFAULT false`); // VIP / all-access area
+    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS badge_active BOOLEAN DEFAULT true`);
+    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS print_status VARCHAR(20) DEFAULT 'none'`); // none | queued | printed
+    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS printed_at TIMESTAMP`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_wristbands_badge_type ON wristbands(badge_type)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_wristbands_print_status ON wristbands(print_status)`);
+
+    // ── Controlled-access zones (3 private box suites + party deck) ──
+    // Each badge carries the set of zone keys it may enter. A suite is limited
+    // to one sponsor's guests; the party deck is open to those guests plus some
+    // other sponsors. Door scanners (badge-access.html) check membership.
+    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS access_zones JSONB DEFAULT '[]'`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS access_zones (
+        key           VARCHAR(40) PRIMARY KEY,
+        label         VARCHAR(120) NOT NULL,
+        sponsor_label VARCHAR(255),         -- which sponsor this suite belongs to (label / auto-assign hint)
+        sort          INTEGER DEFAULT 0,
+        active        BOOLEAN DEFAULT true
+      )
+    `);
+    await pool.query(`
+      INSERT INTO access_zones (key, label, sort) VALUES
+        ('suite_1', 'Suite 1', 1),
+        ('suite_2', 'Suite 2', 2),
+        ('suite_3', 'Suite 3', 3),
+        ('party_deck', 'Party Deck', 4)
+      ON CONFLICT (key) DO NOTHING
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS zone_access_log (
+        id          VARCHAR(255) PRIMARY KEY,
+        rfid_uid    VARCHAR(255),
+        badge_id    VARCHAR(255),
+        zone_key    VARCHAR(40),
+        granted     BOOLEAN,
+        guest_name  VARCHAR(255),
+        scanned_by  VARCHAR(255),
+        created_at  TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_zone_access_log_zone ON zone_access_log(zone_key)`);
 
     // Sponsor/vendor logo support — see migrations/002_sponsor_vendor_logos.sql
     // TODO: move to a real migration tool; mirroring SQL here for Railway auto-deploy.

@@ -29,11 +29,11 @@ router.get('/sponsors/:id', authenticateToken, async (req, res) => {
 
 router.post('/sponsors', authenticateToken, async (req, res) => {
   try {
-    const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind } = req.body;
+    const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind, active } = req.body;
     const result = await pool.query(
-      `INSERT INTO sponsors (name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid || false, in_kind || false]
+      `INSERT INTO sponsors (name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind, active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid || false, in_kind || false, active !== false]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -44,12 +44,12 @@ router.post('/sponsors', authenticateToken, async (req, res) => {
 
 router.put('/sponsors/:id', authenticateToken, async (req, res) => {
   try {
-    const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind } = req.body;
+    const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind, active } = req.body;
     const result = await pool.query(
       `UPDATE sponsors SET name=$1, contact_name=$2, phone=$3, email=$4, city=$5, province=$6,
-       address=$7, postal_code=$8, logo_url=$9, notes=$10, paid=$11, in_kind=$12, updated_at=NOW()
-       WHERE id=$13 RETURNING *`,
-      [name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid || false, in_kind || false, req.params.id]
+       address=$7, postal_code=$8, logo_url=$9, notes=$10, paid=$11, in_kind=$12, active=$13, updated_at=NOW()
+       WHERE id=$14 RETURNING *`,
+      [name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid || false, in_kind || false, active !== false, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(result.rows[0]);
@@ -136,11 +136,11 @@ router.get('/vendors', authenticateToken, async (req, res) => {
 
 router.post('/vendors', authenticateToken, async (req, res) => {
   try {
-    const { name, contact_name, phone, email, city, province, address, postal_code, product, booth_size, comment, paid, in_kind } = req.body;
+    const { name, contact_name, phone, email, city, province, address, postal_code, product, booth_size, comment, paid, in_kind, active } = req.body;
     const result = await pool.query(
-      `INSERT INTO vendors (name, contact_name, phone, email, city, province, address, postal_code, product, booth_size, comment, paid, in_kind)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-      [name, contact_name, phone, email, city, province, address, postal_code, product, booth_size, comment, paid || false, in_kind || false]
+      `INSERT INTO vendors (name, contact_name, phone, email, city, province, address, postal_code, product, booth_size, comment, paid, in_kind, active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [name, contact_name, phone, email, city, province, address, postal_code, product, booth_size, comment, paid || false, in_kind || false, active !== false]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -150,12 +150,12 @@ router.post('/vendors', authenticateToken, async (req, res) => {
 
 router.put('/vendors/:id', authenticateToken, async (req, res) => {
   try {
-    const { name, contact_name, phone, email, city, province, address, postal_code, product, booth_size, comment, paid, in_kind } = req.body;
+    const { name, contact_name, phone, email, city, province, address, postal_code, product, booth_size, comment, paid, in_kind, active } = req.body;
     const result = await pool.query(
       `UPDATE vendors SET name=$1, contact_name=$2, phone=$3, email=$4, city=$5, province=$6,
-       address=$7, postal_code=$8, product=$9, booth_size=$10, comment=$11, paid=$12, in_kind=$13, updated_at=NOW()
-       WHERE id=$14 RETURNING *`,
-      [name, contact_name, phone, email, city, province, address, postal_code, product, booth_size, comment, paid || false, in_kind || false, req.params.id]
+       address=$7, postal_code=$8, product=$9, booth_size=$10, comment=$11, paid=$12, in_kind=$13, active=$14, updated_at=NOW()
+       WHERE id=$15 RETURNING *`,
+      [name, contact_name, phone, email, city, province, address, postal_code, product, booth_size, comment, paid || false, in_kind || false, active !== false, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(result.rows[0]);

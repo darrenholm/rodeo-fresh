@@ -235,6 +235,9 @@ app.use((err, req, res, next) => {
     await pool.query(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS in_kind BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS paid BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS in_kind BOOLEAN DEFAULT false`);
+    // Active flag — inactive records are hidden from the list by default to reduce clutter
+    await pool.query(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
+    await pool.query(`ALTER TABLE vendors  ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
 
     // ── VIP / Volunteer / Sponsor name-tag badges ──
     // Badges live in the wristbands table so they instantly work at the

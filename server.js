@@ -220,24 +220,28 @@ app.use((err, req, res, next) => {
 // ============================================
 
 (async () => {
+  // Each step runs independently so one failing statement can't silently skip
+  // the rest of the schema; failures log as errors with the offending SQL.
+  const mig = (sql) => pool.query(sql).catch(e =>
+    console.error('⚠️  Auto-migration step failed:', e.message, '|', sql.trim().split('\n')[0].slice(0, 80)));
   try {
-    await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS is_19_plus BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS bar_credits INTEGER DEFAULT 0`);
-    await pool.query(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'pending'`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS roles JSONB DEFAULT '["admin"]'`);
-    await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS rfid_uid VARCHAR UNIQUE`);
-    await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS drink_allowance INTEGER DEFAULT 8`);
-    await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS drinks_used INTEGER DEFAULT 0`);
-    await pool.query(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS wristband_active BOOLEAN DEFAULT false`);
+    await mig(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS is_19_plus BOOLEAN DEFAULT false`);
+    await mig(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS bar_credits INTEGER DEFAULT 0`);
+    await mig(`ALTER TABLE ticket_orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'pending'`);
+    await mig(`ALTER TABLE users ADD COLUMN IF NOT EXISTS roles JSONB DEFAULT '["admin"]'`);
+    await mig(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS rfid_uid VARCHAR UNIQUE`);
+    await mig(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS drink_allowance INTEGER DEFAULT 8`);
+    await mig(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS drinks_used INTEGER DEFAULT 0`);
+    await mig(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS wristband_active BOOLEAN DEFAULT false`);
 
     // Sponsor / vendor payment flags (record-level)
-    await pool.query(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS paid BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS in_kind BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS paid BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS in_kind BOOLEAN DEFAULT false`);
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS paid BOOLEAN DEFAULT false`);
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS in_kind BOOLEAN DEFAULT false`);
+    await mig(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS paid BOOLEAN DEFAULT false`);
+    await mig(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS in_kind BOOLEAN DEFAULT false`);
     // Active flag — inactive records are hidden from the list by default to reduce clutter
-    await pool.query(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
-    await pool.query(`ALTER TABLE vendors  ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
+    await mig(`ALTER TABLE vendors  ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
 
     // ── VIP / Volunteer / Sponsor name-tag badges ──
     // Badges live in the wristbands table so they instantly work at the
@@ -246,26 +250,26 @@ app.use((err, req, res, next) => {
     // has badge_type = NULL; a printed name tag sets it to vip/sponsor/volunteer.
     // "Unlimited" badges are flagged AND given a large sentinel credit balance
     // so every existing credit-decrementing path serves them without changes.
-    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS badge_type VARCHAR(20)`);     // vip | sponsor | volunteer | NULL
-    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS tier VARCHAR(50)`);            // e.g. Gold, Silver, Gate Captain
-    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS title VARCHAR(255)`);          // line printed under the name
-    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS company VARCHAR(255)`);        // sponsor org / department
-    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS company_logo_url TEXT`);       // sponsor's primary logo (shown on sponsor/VIP cards)
-    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS photo_url TEXT`);              // Vercel Blob URL
-    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS unlimited BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS area_access BOOLEAN DEFAULT false`); // VIP / all-access area
-    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS badge_active BOOLEAN DEFAULT true`);
-    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS print_status VARCHAR(20) DEFAULT 'none'`); // none | queued | printed
-    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS printed_at TIMESTAMP`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_wristbands_badge_type ON wristbands(badge_type)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_wristbands_print_status ON wristbands(print_status)`);
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS badge_type VARCHAR(20)`);     // vip | sponsor | volunteer | NULL
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS tier VARCHAR(50)`);            // e.g. Gold, Silver, Gate Captain
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS title VARCHAR(255)`);          // line printed under the name
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS company VARCHAR(255)`);        // sponsor org / department
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS company_logo_url TEXT`);       // sponsor's primary logo (shown on sponsor/VIP cards)
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS photo_url TEXT`);              // Vercel Blob URL
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS unlimited BOOLEAN DEFAULT false`);
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS area_access BOOLEAN DEFAULT false`); // VIP / all-access area
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS badge_active BOOLEAN DEFAULT true`);
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS print_status VARCHAR(20) DEFAULT 'none'`); // none | queued | printed
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS printed_at TIMESTAMP`);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_wristbands_badge_type ON wristbands(badge_type)`);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_wristbands_print_status ON wristbands(print_status)`);
 
     // ── Controlled-access zones (3 private box suites + party deck) ──
     // Each badge carries the set of zone keys it may enter. A suite is limited
     // to one sponsor's guests; the party deck is open to those guests plus some
     // other sponsors. Door scanners (badge-access.html) check membership.
-    await pool.query(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS access_zones JSONB DEFAULT '[]'`);
-    await pool.query(`
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS access_zones JSONB DEFAULT '[]'`);
+    await mig(`
       CREATE TABLE IF NOT EXISTS access_zones (
         key           VARCHAR(40) PRIMARY KEY,
         label         VARCHAR(120) NOT NULL,
@@ -274,7 +278,7 @@ app.use((err, req, res, next) => {
         active        BOOLEAN DEFAULT true
       )
     `);
-    await pool.query(`
+    await mig(`
       INSERT INTO access_zones (key, label, sort) VALUES
         ('suite_1', 'Suite 1', 1),
         ('suite_2', 'Suite 2', 2),
@@ -282,7 +286,7 @@ app.use((err, req, res, next) => {
         ('party_deck', 'Party Deck', 4)
       ON CONFLICT (key) DO NOTHING
     `);
-    await pool.query(`
+    await mig(`
       CREATE TABLE IF NOT EXISTS zone_access_log (
         id          VARCHAR(255) PRIMARY KEY,
         rfid_uid    VARCHAR(255),
@@ -294,16 +298,16 @@ app.use((err, req, res, next) => {
         created_at  TIMESTAMP DEFAULT NOW()
       )
     `);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_zone_access_log_zone ON zone_access_log(zone_key)`);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_zone_access_log_zone ON zone_access_log(zone_key)`);
 
     // Sponsor/vendor logo support — see migrations/002_sponsor_vendor_logos.sql
     // TODO: move to a real migration tool; mirroring SQL here for Railway auto-deploy.
-    await pool.query(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`);
-    await pool.query(`ALTER TABLE vendors  ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sponsors_user_id ON sponsors(user_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_vendors_user_id  ON vendors(user_id)`);
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`);
+    await mig(`ALTER TABLE vendors  ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_sponsors_user_id ON sponsors(user_id)`);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_vendors_user_id  ON vendors(user_id)`);
 
-    await pool.query(`
+    await mig(`
       CREATE TABLE IF NOT EXISTS sponsor_logos (
         id            SERIAL PRIMARY KEY,
         sponsor_id    INTEGER NOT NULL REFERENCES sponsors(id) ON DELETE CASCADE,
@@ -320,10 +324,10 @@ app.use((err, req, res, next) => {
         updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sponsor_logos_sponsor ON sponsor_logos(sponsor_id)`);
-    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sponsor_logos_one_primary ON sponsor_logos(sponsor_id) WHERE is_primary`);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_sponsor_logos_sponsor ON sponsor_logos(sponsor_id)`);
+    await mig(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sponsor_logos_one_primary ON sponsor_logos(sponsor_id) WHERE is_primary`);
 
-    await pool.query(`
+    await mig(`
       CREATE TABLE IF NOT EXISTS vendor_logos (
         id            SERIAL PRIMARY KEY,
         vendor_id     INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
@@ -340,12 +344,12 @@ app.use((err, req, res, next) => {
         updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_vendor_logos_vendor ON vendor_logos(vendor_id)`);
-    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vendor_logos_one_primary ON vendor_logos(vendor_id) WHERE is_primary`);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_vendor_logos_vendor ON vendor_logos(vendor_id)`);
+    await mig(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vendor_logos_one_primary ON vendor_logos(vendor_id) WHERE is_primary`);
 
     console.log('✓ Auto-migrations complete');
   } catch (e) {
-    console.log('Migration note:', e.message);
+    console.error('⚠️  Auto-migration block error (unexpected):', e.message);
   }
 })();
 

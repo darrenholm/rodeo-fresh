@@ -23,6 +23,14 @@ const { authenticateToken } = require('../middleware/auth');
 const UNLIMITED_CREDITS = 100000;          // sentinel balance for unlimited badges
 const BADGE_TYPES = ['vip', 'sponsor', 'volunteer'];
 
+// Sponsorship $ → level key (matches the check-in level dropdown). Highest first.
+const LEVEL_THRESHOLDS = [[10000,'title'],[6500,'platinum'],[5000,'gold'],[2500,'silver'],[1000,'bronze'],[500,'friend']];
+function levelFromAmount(amt){
+  amt = Number(amt) || 0;
+  for (const [t, k] of LEVEL_THRESHOLDS) { if (amt >= t) return k; }
+  return '';
+}
+
 // Match the normalization used by every other RFID route so a tag read by
 // the check-in tablet resolves to the same UID at the bar/gate readers.
 function normalizeUid(uid) {
@@ -113,7 +121,9 @@ router.get('/lookup', authenticateToken, async (req, res) => {
       pool.query(
         `SELECT s.id, s.name, s.contact_name, s.email, s.phone, s.city,
                 (SELECT blob_url FROM sponsor_logos l
-                  WHERE l.sponsor_id = s.id ORDER BY l.is_primary DESC, l.created_at LIMIT 1) AS logo_url
+                  WHERE l.sponsor_id = s.id ORDER BY l.is_primary DESC, l.created_at LIMIT 1) AS logo_url,
+                COALESCE((SELECT amount FROM sponsor_schedule sc
+                  WHERE sc.sponsor_id = s.id ORDER BY sc.year DESC LIMIT 1), 0) AS pledge_amount
          FROM sponsors s
          WHERE s.name ILIKE $1 OR s.contact_name ILIKE $1
          ORDER BY s.name LIMIT 15`,
@@ -133,6 +143,7 @@ router.get('/lookup', authenticateToken, async (req, res) => {
         source: 'sponsor', ref_id: String(s.id),
         name: s.contact_name || s.name, company: s.name,
         company_logo_url: s.logo_url || null,
+        sponsorship_level: levelFromAmount(s.pledge_amount),
         email: s.email, phone: s.phone, city: s.city,
       })),
       staff: staff.rows.map(s => ({
@@ -158,7 +169,9 @@ router.get('/sponsor-guests', authenticateToken, async (req, res) => {
     const sr = await pool.query(
       `SELECT s.id, s.name,
               (SELECT blob_url FROM sponsor_logos l
-                WHERE l.sponsor_id = s.id ORDER BY l.is_primary DESC, l.created_at LIMIT 1) AS logo_url
+                WHERE l.sponsor_id = s.id ORDER BY l.is_primary DESC, l.created_at LIMIT 1) AS logo_url,
+              COALESCE((SELECT amount FROM sponsor_schedule sc
+                WHERE sc.sponsor_id = s.id ORDER BY sc.year DESC LIMIT 1), 0) AS pledge_amount
        FROM sponsors s WHERE s.id = $1`,
       [sponsorId]
     ).catch(() => ({ rows: [] }));
@@ -174,7 +187,8 @@ router.get('/sponsor-guests', authenticateToken, async (req, res) => {
 
     res.json({
       sponsor: sponsor
-        ? { id: sponsor.id, company: sponsor.name, company_logo_url: sponsor.logo_url || null }
+        ? { id: sponsor.id, company: sponsor.name, company_logo_url: sponsor.logo_url || null,
+            sponsorship_level: levelFromAmount(sponsor.pledge_amount) }
         : null,
       guests: gr.rows.map(g => ({
         sponsor_guest_id: g.id,

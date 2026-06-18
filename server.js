@@ -28,6 +28,7 @@ const productRoutes = require('./routes/products');
 const orderRoutes = require('./routes/orders');
 const dashboardRoutes = require('./routes/dashboard');
 const sponsorsVendorsRoutes = require('./routes/sponsors-vendors');
+const sponsorPortalRoutes = require('./routes/sponsors-portal');
 const sponsorLogosRoutes = require('./routes/sponsorLogos');
 const vendorLogosRoutes = require('./routes/vendorLogos');
 
@@ -149,6 +150,7 @@ app.use('/api/merch', merchRoutes);
 
 // Sponsors & Vendors
 app.use('/api', sponsorsVendorsRoutes);
+app.use('/api/sponsor-portal', sponsorPortalRoutes);
 app.use('/api/sponsor-logos', sponsorLogosRoutes);
 app.use('/api/vendor-logos', vendorLogosRoutes);
 
@@ -346,6 +348,35 @@ app.use((err, req, res, next) => {
     `);
     await mig(`CREATE INDEX IF NOT EXISTS idx_vendor_logos_vendor ON vendor_logos(vendor_id)`);
     await mig(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vendor_logos_one_primary ON vendor_logos(vendor_id) WHERE is_primary`);
+
+    // ── Sponsor self-registration portal ──
+    // Sponsors sign in via an emailed magic link (no password) and pre-enter
+    // their own guest list ahead of the event. The rodeo assigns each sponsor a
+    // guest cap (max_guests) and the zones their guests may be granted
+    // (allocated_zones — a subset of access_zones keys). Staff finalize each
+    // pre-registered guest at check-in (photo + NFC card + print).
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS max_guests       INTEGER`);            // NULL = no cap set yet
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS allocated_zones  JSONB DEFAULT '[]'`); // zone keys this sponsor may grant
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS portal_enabled   BOOLEAN DEFAULT false`);
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS login_token_hash VARCHAR(255)`);       // sha256 of the active magic link
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS login_token_exp  TIMESTAMP`);
+
+    // Pre-registered guests staged by sponsors; each becomes a badge at check-in.
+    await mig(`
+      CREATE TABLE IF NOT EXISTS sponsor_guests (
+        id              SERIAL PRIMARY KEY,
+        sponsor_id      INTEGER NOT NULL REFERENCES sponsors(id) ON DELETE CASCADE,
+        name            VARCHAR(255) NOT NULL,
+        title           VARCHAR(255),                  -- role line printed under the name
+        email           VARCHAR(255),
+        requested_zones JSONB DEFAULT '[]',            -- subset of sponsor.allocated_zones
+        status          VARCHAR(20) DEFAULT 'pending', -- pending | checked_in | cancelled
+        badge_id        VARCHAR(255),                  -- wristbands.id once printed
+        created_at      TIMESTAMP DEFAULT NOW(),
+        updated_at      TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_sponsor_guests_sponsor ON sponsor_guests(sponsor_id)`);
 
     console.log('✓ Auto-migrations complete');
   } catch (e) {

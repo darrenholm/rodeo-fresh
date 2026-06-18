@@ -506,3 +506,6 @@ router.post('/sponsor-outreach', authenticateToken, async (req, res) => {
 });
 
 module.exports = router;
+// Expose the Resend helper so other routes (e.g. sponsor-portal magic links)
+// can send mail without duplicating the Resend fetch.
+module.exports.sendEmail = sendEmail;

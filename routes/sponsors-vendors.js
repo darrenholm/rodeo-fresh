@@ -27,13 +27,26 @@ router.get('/sponsors/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Normalize the sponsor-portal allotment fields shared by create + update.
+function portalFields(body) {
+  const zones = Array.isArray(body.allocated_zones) ? [...new Set(body.allocated_zones)] : [];
+  const max = body.max_guests === '' || body.max_guests == null ? null : parseInt(body.max_guests, 10);
+  return {
+    max_guests: Number.isFinite(max) ? max : null,
+    allocated_zones: JSON.stringify(zones),
+    portal_enabled: body.portal_enabled === true,
+  };
+}
+
 router.post('/sponsors', authenticateToken, async (req, res) => {
   try {
     const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind, active } = req.body;
+    const pf = portalFields(req.body);
     const result = await pool.query(
-      `INSERT INTO sponsors (name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind, active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-      [name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid || false, in_kind || false, active !== false]
+      `INSERT INTO sponsors (name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind, active, max_guests, allocated_zones, portal_enabled)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+      [name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid || false, in_kind || false, active !== false,
+       pf.max_guests, pf.allocated_zones, pf.portal_enabled]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -45,11 +58,14 @@ router.post('/sponsors', authenticateToken, async (req, res) => {
 router.put('/sponsors/:id', authenticateToken, async (req, res) => {
   try {
     const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind, active } = req.body;
+    const pf = portalFields(req.body);
     const result = await pool.query(
       `UPDATE sponsors SET name=$1, contact_name=$2, phone=$3, email=$4, city=$5, province=$6,
-       address=$7, postal_code=$8, logo_url=$9, notes=$10, paid=$11, in_kind=$12, active=$13, updated_at=NOW()
-       WHERE id=$14 RETURNING *`,
-      [name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid || false, in_kind || false, active !== false, req.params.id]
+       address=$7, postal_code=$8, logo_url=$9, notes=$10, paid=$11, in_kind=$12, active=$13,
+       max_guests=$14, allocated_zones=$15, portal_enabled=$16, updated_at=NOW()
+       WHERE id=$17 RETURNING *`,
+      [name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid || false, in_kind || false, active !== false,
+       pf.max_guests, pf.allocated_zones, pf.portal_enabled, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(result.rows[0]);

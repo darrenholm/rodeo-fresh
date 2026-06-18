@@ -27,6 +27,12 @@ const authenticateToken = (req, res, next) => {
     if (err) {
       return res.status(403).json({ error: 'Invalid or expired token' });
     }
+    // Sponsor-portal sessions are signed with the same secret but must never
+    // reach staff/admin endpoints — they are verified by sponsorAuth in
+    // routes/sponsors-portal.js instead.
+    if (user && user.role === 'sponsor') {
+      return res.status(403).json({ error: 'Invalid token for this resource' });
+    }
     req.user = user;
     next();
   });

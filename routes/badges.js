@@ -146,6 +146,50 @@ router.get('/lookup', authenticateToken, async (req, res) => {
   }
 });
 
+// ─── GET /api/badges/sponsor-guests?sponsor_id=  — a sponsor's pre-registered, not-yet-checked-in guests ───
+// Lets check-in staff pick a guest the sponsor pre-entered (name/title/zones)
+// instead of retyping. The badge is still created the normal way (photo + NFC
+// card added here), with sponsor_guest_id passed to POST /api/badges to link it.
+router.get('/sponsor-guests', authenticateToken, async (req, res) => {
+  try {
+    const sponsorId = parseInt(req.query.sponsor_id, 10);
+    if (!sponsorId) return res.status(400).json({ error: 'sponsor_id required' });
+
+    const sr = await pool.query(
+      `SELECT s.id, s.name,
+              (SELECT blob_url FROM sponsor_logos l
+                WHERE l.sponsor_id = s.id ORDER BY l.is_primary DESC, l.created_at LIMIT 1) AS logo_url
+       FROM sponsors s WHERE s.id = $1`,
+      [sponsorId]
+    ).catch(() => ({ rows: [] }));
+    const sponsor = sr.rows[0] || null;
+
+    const gr = await pool.query(
+      `SELECT id, name, title, email, requested_zones
+       FROM sponsor_guests
+       WHERE sponsor_id = $1 AND status = 'pending'
+       ORDER BY created_at`,
+      [sponsorId]
+    );
+
+    res.json({
+      sponsor: sponsor
+        ? { id: sponsor.id, company: sponsor.name, company_logo_url: sponsor.logo_url || null }
+        : null,
+      guests: gr.rows.map(g => ({
+        sponsor_guest_id: g.id,
+        name: g.name,
+        title: g.title,
+        email: g.email,
+        access_zones: Array.isArray(g.requested_zones) ? g.requested_zones : [],
+      })),
+    });
+  } catch (err) {
+    console.error('GET /badges/sponsor-guests error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── GET /api/badges/print-queue  — badges waiting to print (for the Seaory station) ───
 router.get('/print-queue', authenticateToken, async (req, res) => {
   try {
@@ -292,6 +336,15 @@ router.post('/', authenticateToken, async (req, res) => {
        company || null, company_logo_url || null, photoUrl, credits, !!alcohol_approved, unlimited, areaAccess,
        JSON.stringify(zones), actor(req)]
     );
+
+    // If this badge fulfils a sponsor's pre-registered guest, mark it checked in.
+    if (req.body.sponsor_guest_id) {
+      await pool.query(
+        `UPDATE sponsor_guests SET status = 'checked_in', badge_id = $1, updated_at = NOW()
+         WHERE id = $2 AND status = 'pending'`,
+        [id, req.body.sponsor_guest_id]
+      ).catch(e => console.error('link sponsor_guest failed:', e.message));
+    }
 
     console.log(`✓ Badge created: ${name} (${badge_type}${tier ? '/' + tier : ''}) → ${uid}`);
     res.json({ success: true, badge: result.rows[0] });

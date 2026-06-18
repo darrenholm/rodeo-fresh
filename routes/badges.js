@@ -503,4 +503,26 @@ router.post('/:id/deactivate', authenticateToken, async (req, res) => {
   }
 });
 
+// ─── DELETE /api/badges/:id  — permanently remove a badge (frees the NFC card) ───
+router.delete('/:id', authenticateToken, async (req, res) => {
+  try {
+    const existing = await pool.query(
+      'SELECT id FROM wristbands WHERE id = $1 AND badge_type IS NOT NULL', [req.params.id]
+    );
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Badge not found' });
+    // If this badge fulfilled a pre-registered guest, send them back to pending
+    // so they can be re-issued.
+    await pool.query(
+      `UPDATE sponsor_guests SET status = 'pending', badge_id = NULL, updated_at = NOW()
+       WHERE badge_id = $1`, [req.params.id]
+    ).catch(() => {});
+    await pool.query('DELETE FROM wristbands WHERE id = $1', [req.params.id]);
+    console.log(`✓ Badge deleted: ${req.params.id} by ${actor(req)}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /badges/:id error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

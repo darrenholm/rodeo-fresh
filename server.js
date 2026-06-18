@@ -263,6 +263,8 @@ app.use((err, req, res, next) => {
     await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS badge_active BOOLEAN DEFAULT true`);
     await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS print_status VARCHAR(20) DEFAULT 'none'`); // none | queued | printed
     await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS printed_at TIMESTAMP`);
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)`);  // staff who created the badge (POST /api/badges)
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS created_date TIMESTAMP DEFAULT NOW()`);
     await mig(`CREATE INDEX IF NOT EXISTS idx_wristbands_badge_type ON wristbands(badge_type)`);
     await mig(`CREATE INDEX IF NOT EXISTS idx_wristbands_print_status ON wristbands(print_status)`);
 

@@ -121,7 +121,8 @@ router.get('/lookup', authenticateToken, async (req, res) => {
       pool.query(
         `SELECT s.id, s.name, s.contact_name, s.email, s.phone, s.city,
                 (SELECT blob_url FROM sponsor_logos l
-                  WHERE l.sponsor_id = s.id ORDER BY l.is_primary DESC, l.created_at LIMIT 1) AS logo_url,
+                  WHERE l.sponsor_id = s.id AND lower(l.extension) IN ('png','jpg','jpeg','gif','webp','svg')
+                  ORDER BY l.is_primary DESC, l.created_at LIMIT 1) AS logo_url,
                 COALESCE((SELECT amount FROM sponsor_schedule sc
                   WHERE sc.sponsor_id = s.id ORDER BY sc.year DESC LIMIT 1), 0) AS pledge_amount
          FROM sponsors s
@@ -169,7 +170,8 @@ router.get('/sponsor-guests', authenticateToken, async (req, res) => {
     const sr = await pool.query(
       `SELECT s.id, s.name,
               (SELECT blob_url FROM sponsor_logos l
-                WHERE l.sponsor_id = s.id ORDER BY l.is_primary DESC, l.created_at LIMIT 1) AS logo_url,
+                WHERE l.sponsor_id = s.id AND lower(l.extension) IN ('png','jpg','jpeg','gif','webp','svg')
+                  ORDER BY l.is_primary DESC, l.created_at LIMIT 1) AS logo_url,
               COALESCE((SELECT amount FROM sponsor_schedule sc
                 WHERE sc.sponsor_id = s.id ORDER BY sc.year DESC LIMIT 1), 0) AS pledge_amount
        FROM sponsors s WHERE s.id = $1`,

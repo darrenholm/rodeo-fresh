@@ -245,6 +245,10 @@ app.use((err, req, res, next) => {
     await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
     await mig(`ALTER TABLE vendors  ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
 
+    // Sponsor website — shown on the public site's scrolling logo ticker; each
+    // logo links here when set. See GET /api/sponsors/public.
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS website VARCHAR(500)`);
+
     // ── VIP / Volunteer / Sponsor name-tag badges ──
     // Badges live in the wristbands table so they instantly work at the
     // existing bar (/drinks/serve), food kiosk (/wristbands/redeem) and

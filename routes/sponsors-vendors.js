@@ -4,6 +4,55 @@ const pool = require('../config/database');
 const router = express.Router();
 
 // ╔══════════════════════════════════════════╗
+// ║      PUBLIC SPONSOR TICKER (no auth)     ║
+// ╚══════════════════════════════════════════╝
+//
+// Feeds the scrolling logo ticker on holmdalerodeo.ca. Returns only the
+// public-safe fields (name, website, logo) for sponsors tied to the given
+// event year — i.e. anyone with a sponsor_schedule row for that year,
+// REGARDLESS of payment status. Defaults to the current calendar year.
+//
+// Logo source priority: a web-displayable logo from sponsor_logos (primary
+// first, then full-colour), falling back to the sponsors.logo_url column.
+// Sponsors with no displayable logo are omitted — a logo ticker can't show
+// them. Use GET /api/sponsors/logo-report (auth) to find who's missing logos.
+const DISPLAYABLE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'];
+
+router.get('/sponsors/public', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const result = await pool.query(
+      `SELECT s.id, s.name, NULLIF(s.website, '') AS website,
+         COALESCE(
+           (SELECT sl.blob_url FROM sponsor_logos sl
+              WHERE sl.sponsor_id = s.id
+                AND lower(sl.extension) = ANY($2)
+              ORDER BY sl.is_primary DESC,
+                       CASE WHEN sl.variant = 'full-color' THEN 0
+                            WHEN sl.variant IS NULL          THEN 1
+                            ELSE 2 END,
+                       sl.created_at DESC
+              LIMIT 1),
+           NULLIF(s.logo_url, '')
+         ) AS logo_url
+       FROM sponsors s
+       WHERE s.active IS NOT FALSE
+         AND EXISTS (
+           SELECT 1 FROM sponsor_schedule ss
+           WHERE ss.sponsor_id = s.id AND ss.year = $1
+         )
+       ORDER BY s.name`,
+      [year, DISPLAYABLE_EXTS]
+    );
+    // Only return sponsors we can actually display a logo for.
+    res.json(result.rows.filter(r => r.logo_url));
+  } catch (err) {
+    console.error('GET /sponsors/public error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ╔══════════════════════════════════════════╗
 // ║            SPONSORS CRUD                 ║
 // ╚══════════════════════════════════════════╝
 
@@ -13,6 +62,43 @@ router.get('/sponsors', authenticateToken, async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('GET /sponsors error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Logo coverage report — which sponsors lack a bitmap and/or vector logo.
+// Scoped to a single event year (default current year) so it lists the
+// sponsors actually appearing this season. ?year=all for every sponsor.
+router.get('/sponsors/logo-report', authenticateToken, async (req, res) => {
+  try {
+    const allYears = req.query.year === 'all';
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const result = await pool.query(
+      `SELECT s.id, s.name,
+         COALESCE(bool_or(sl.format = 'bitmap'), false) AS has_bitmap,
+         COALESCE(bool_or(sl.format = 'vector'), false) AS has_vector,
+         COUNT(sl.id)::int AS logo_count
+       FROM sponsors s
+       ${allYears ? '' : `JOIN sponsor_schedule ss ON ss.sponsor_id = s.id AND ss.year = $1`}
+       LEFT JOIN sponsor_logos sl ON sl.sponsor_id = s.id
+       WHERE s.active IS NOT FALSE
+       GROUP BY s.id, s.name
+       ORDER BY s.name`,
+      allYears ? [] : [year]
+    );
+    const rows = result.rows;
+    res.json({
+      year: allYears ? 'all' : year,
+      total: rows.length,
+      missing: rows.filter(r => !(r.has_bitmap && r.has_vector)).map(r => ({
+        id: r.id,
+        name: r.name,
+        needs: [!r.has_bitmap && 'bitmap', !r.has_vector && 'vector'].filter(Boolean),
+      })),
+      sponsors: rows,
+    });
+  } catch (err) {
+    console.error('GET /sponsors/logo-report error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -40,12 +126,12 @@ function portalFields(body) {
 
 router.post('/sponsors', authenticateToken, async (req, res) => {
   try {
-    const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind, active } = req.body;
+    const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, website, notes, paid, in_kind, active } = req.body;
     const pf = portalFields(req.body);
     const result = await pool.query(
-      `INSERT INTO sponsors (name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind, active, max_guests, allocated_zones, portal_enabled)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
-      [name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid || false, in_kind || false, active !== false,
+      `INSERT INTO sponsors (name, contact_name, phone, email, city, province, address, postal_code, logo_url, website, notes, paid, in_kind, active, max_guests, allocated_zones, portal_enabled)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+      [name, contact_name, phone, email, city, province, address, postal_code, logo_url, website || null, notes, paid || false, in_kind || false, active !== false,
        pf.max_guests, pf.allocated_zones, pf.portal_enabled]
     );
     res.json(result.rows[0]);
@@ -57,14 +143,14 @@ router.post('/sponsors', authenticateToken, async (req, res) => {
 
 router.put('/sponsors/:id', authenticateToken, async (req, res) => {
   try {
-    const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid, in_kind, active } = req.body;
+    const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, website, notes, paid, in_kind, active } = req.body;
     const pf = portalFields(req.body);
     const result = await pool.query(
       `UPDATE sponsors SET name=$1, contact_name=$2, phone=$3, email=$4, city=$5, province=$6,
-       address=$7, postal_code=$8, logo_url=$9, notes=$10, paid=$11, in_kind=$12, active=$13,
-       max_guests=$14, allocated_zones=$15, portal_enabled=$16, updated_at=NOW()
-       WHERE id=$17 RETURNING *`,
-      [name, contact_name, phone, email, city, province, address, postal_code, logo_url, notes, paid || false, in_kind || false, active !== false,
+       address=$7, postal_code=$8, logo_url=$9, website=$10, notes=$11, paid=$12, in_kind=$13, active=$14,
+       max_guests=$15, allocated_zones=$16, portal_enabled=$17, updated_at=NOW()
+       WHERE id=$18 RETURNING *`,
+      [name, contact_name, phone, email, city, province, address, postal_code, logo_url, website || null, notes, paid || false, in_kind || false, active !== false,
        pf.max_guests, pf.allocated_zones, pf.portal_enabled, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });

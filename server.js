@@ -260,6 +260,15 @@ app.use((err, req, res, next) => {
     // (CorelDRAW .cdr, .ai, .pdf, .tif, .svg). NULL for png/jpg which render as-is.
     await mig(`ALTER TABLE sponsor_logos ADD COLUMN IF NOT EXISTS preview_url TEXT`);
 
+    // Sponsor tiers — drives signage + banner logo sizing by sponsor level.
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS sponsor_level VARCHAR(20)`);
+    await mig(`CREATE TABLE IF NOT EXISTS sponsor_levels (
+      name VARCHAR(20) PRIMARY KEY, amount NUMERIC NOT NULL, rank INTEGER NOT NULL)`);
+    for (const [n, a, r] of [['Title',10000,1],['Platinum',6500,2],['Gold',5000,3],['Silver',2500,4],['Bronze',1000,5],['Friend',500,6]]) {
+      await mig(`INSERT INTO sponsor_levels (name,amount,rank) VALUES ('${n}',${a},${r})
+        ON CONFLICT (name) DO UPDATE SET amount=EXCLUDED.amount, rank=EXCLUDED.rank`);
+    }
+
     // ── VIP / Volunteer / Sponsor name-tag badges ──
     // Badges live in the wristbands table so they instantly work at the
     // existing bar (/drinks/serve), food kiosk (/wristbands/redeem) and

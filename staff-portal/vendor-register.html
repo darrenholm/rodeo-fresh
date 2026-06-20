@@ -287,6 +287,12 @@
                         </select>
                     </div>
                 </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Website</label>
+                        <input type="url" id="website" placeholder="https://yourbusiness.com">
+                    </div>
+                </div>
 
                 <div class="section-title">Vendor Type</div>
                 <div class="radio-group">
@@ -419,6 +425,7 @@
             var phone = document.getElementById('phone').value.trim();
             var city = document.getElementById('city').value.trim();
             var province = document.getElementById('province').value;
+            var website = document.getElementById('website').value.trim();
             var product = document.getElementById('product').value.trim();
             var comment = document.getElementById('comment').value.trim();
 
@@ -460,6 +467,7 @@
                         phone: phone,
                         city: city,
                         province: province,
+                        website: website,
                         product: product,
                         booth_size: boothSize,
                         vendor_type: vendorType,

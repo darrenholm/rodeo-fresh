@@ -152,6 +152,7 @@ app.use('/api/merch', merchRoutes);
 app.use('/api', sponsorsVendorsRoutes);
 app.use('/api/sponsor-portal', sponsorPortalRoutes);
 app.use('/api/sponsor-logos', sponsorLogosRoutes);
+app.use('/api/sponsor-intake', require('./routes/sponsor-intake'));
 app.use('/api/vendor-logos', vendorLogosRoutes);
 
 // Wristband Transfer & Balance
@@ -249,6 +250,15 @@ app.use((err, req, res, next) => {
     // logo links here when set. See GET /api/sponsors/public.
     await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS website VARCHAR(500)`);
     await mig(`ALTER TABLE vendors  ADD COLUMN IF NOT EXISTS website VARCHAR(500)`);
+
+    // Sponsor logo/website intake — a long-lived single-token link emailed to
+    // each sponsor so they can review the logos we hold, upload new ones, and
+    // confirm their website without a login. See routes/sponsor-intake.js.
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS intake_token_hash VARCHAR(64)`);
+    await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS intake_token_exp  TIMESTAMP`);
+    // Rasterized PNG preview for logos that can't render in email/web directly
+    // (CorelDRAW .cdr, .ai, .pdf, .tif, .svg). NULL for png/jpg which render as-is.
+    await mig(`ALTER TABLE sponsor_logos ADD COLUMN IF NOT EXISTS preview_url TEXT`);
 
     // ── VIP / Volunteer / Sponsor name-tag badges ──
     // Badges live in the wristbands table so they instantly work at the

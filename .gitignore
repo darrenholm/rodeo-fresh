@@ -7,3 +7,4 @@ reseed-*.js
 seed-*.js
 reset-*.js
 0[0-9]-*.js
+scripts/out/

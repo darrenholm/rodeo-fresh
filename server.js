@@ -269,6 +269,10 @@ app.use((err, req, res, next) => {
       await mig(`INSERT INTO sponsor_levels (name,amount,rank) VALUES ('${n}',${a},${r})
         ON CONFLICT (name) DO UPDATE SET amount=EXCLUDED.amount, rank=EXCLUDED.rank`);
     }
+    // Per-year manual level override on the schedule. NULL = auto-derive the
+    // level from that year's amount (the default). When set to a sponsor_levels
+    // name it forces the displayed level for that sponsor+year regardless of amount.
+    await mig(`ALTER TABLE sponsor_schedule ADD COLUMN IF NOT EXISTS level_override VARCHAR(20)`);
 
     // Social spotlight posts — tracks the daily Facebook sponsor spotlight so
     // the rotation never repeats. See lib/spotlight.js + the daily cron below.

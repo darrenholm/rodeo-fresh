@@ -113,6 +113,20 @@ router.get('/sponsors/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Valid sponsor levels, highest to lowest (mirrors the seeded sponsor_levels
+// table). A per-year level_override must be one of these names, or NULL to let
+// the level auto-derive from that year's amount.
+const SPONSOR_LEVELS = ['Title', 'Platinum', 'Gold', 'Silver', 'Bronze', 'Friend'];
+
+// Coerce an incoming level_override to a canonical level name, or NULL (= auto).
+// Blank/missing/unknown values all fall back to NULL so a bad string can never
+// pin a sponsor to a bogus level.
+function normalizeLevelOverride(v) {
+  if (v == null) return null;
+  const match = SPONSOR_LEVELS.find(l => l.toLowerCase() === String(v).trim().toLowerCase());
+  return match || null;
+}
+
 // Normalize the sponsor-portal allotment fields shared by create + update.
 function portalFields(body) {
   const zones = Array.isArray(body.allocated_zones) ? [...new Set(body.allocated_zones)] : [];
@@ -204,8 +218,8 @@ router.put('/sponsor-schedule/:sponsorId', authenticateToken, async (req, res) =
     for (const e of entries) {
       if (parseFloat(e.amount) > 0 || e.year) {
         await client.query(
-          'INSERT INTO sponsor_schedule (sponsor_id, year, amount, paid) VALUES ($1,$2,$3,$4)',
-          [req.params.sponsorId, e.year, parseFloat(e.amount) || 0, e.paid || false]
+          'INSERT INTO sponsor_schedule (sponsor_id, year, amount, paid, level_override) VALUES ($1,$2,$3,$4,$5)',
+          [req.params.sponsorId, e.year, parseFloat(e.amount) || 0, e.paid || false, normalizeLevelOverride(e.level_override)]
         );
       }
     }

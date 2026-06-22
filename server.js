@@ -153,6 +153,7 @@ app.use('/api', sponsorsVendorsRoutes);
 app.use('/api/sponsor-portal', sponsorPortalRoutes);
 app.use('/api/sponsor-logos', sponsorLogosRoutes);
 app.use('/api/sponsor-intake', require('./routes/sponsor-intake'));
+app.use('/api/social', require('./routes/social'));
 app.use('/api/vendor-logos', vendorLogosRoutes);
 
 // Wristband Transfer & Balance
@@ -268,6 +269,19 @@ app.use((err, req, res, next) => {
       await mig(`INSERT INTO sponsor_levels (name,amount,rank) VALUES ('${n}',${a},${r})
         ON CONFLICT (name) DO UPDATE SET amount=EXCLUDED.amount, rank=EXCLUDED.rank`);
     }
+
+    // Social spotlight posts — tracks the daily Facebook sponsor spotlight so
+    // the rotation never repeats. See lib/spotlight.js + the daily cron below.
+    await mig(`CREATE TABLE IF NOT EXISTS social_posts (
+      id          SERIAL PRIMARY KEY,
+      sponsor_id  INTEGER REFERENCES sponsors(id) ON DELETE CASCADE,
+      platform    VARCHAR(20) NOT NULL DEFAULT 'facebook',
+      fb_post_id  VARCHAR(120),
+      image_url   TEXT,
+      caption     TEXT,
+      posted_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_social_posts_sponsor ON social_posts(sponsor_id, posted_at)`);
 
     // ── VIP / Volunteer / Sponsor name-tag badges ──
     // Badges live in the wristbands table so they instantly work at the
@@ -443,6 +457,24 @@ app.listen(PORT, () => {
   console.log(`[blob] Token loaded: ${(process.env.BLOB_READ_WRITE_TOKEN || 'MISSING').slice(0, 25)}...`);
   console.log('='.repeat(50));
 });
+
+// ── Daily Facebook sponsor spotlight ──
+// Posts one sponsor/day at 15:00 UTC (~11am ET). Skips itself if no FB token,
+// or if a spotlight already went out today (see lib/spotlight.js).
+if (process.env.FB_PAGE_ACCESS_TOKEN) {
+  const cron = require('node-cron');
+  cron.schedule('0 15 * * *', async () => {
+    try {
+      const r = await require('./lib/spotlight').postNextSpotlight();
+      console.log('[cron] daily spotlight:', JSON.stringify(r));
+    } catch (e) {
+      console.error('[cron] daily spotlight failed:', e.message);
+    }
+  });
+  console.log('🗓️  Daily sponsor spotlight scheduled (15:00 UTC)');
+} else {
+  console.log('⚠️  FB_PAGE_ACCESS_TOKEN not set — daily spotlight disabled');
+}
 
 process.on('SIGTERM', () => {
   console.log('SIGTERM received: shutting down');

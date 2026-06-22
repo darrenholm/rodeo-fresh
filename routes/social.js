@@ -27,6 +27,17 @@ router.get('/spotlight/preview', authenticateToken, async (req, res) => {
   }
 });
 
+// ─── POST /api/social/report — send the weekly status report now (admin) ───
+router.post('/report', authenticateToken, async (req, res) => {
+  try {
+    const r = await spotlight.sendWeeklyReport();
+    res.json(r);
+  } catch (err) {
+    console.error('POST /social/report error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── GET /api/social/posts — spotlight history ───
 router.get('/posts', authenticateToken, async (req, res) => {
   try {

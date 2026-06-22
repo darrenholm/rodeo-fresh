@@ -461,8 +461,8 @@ app.listen(PORT, () => {
 // ── Daily Facebook sponsor spotlight ──
 // Posts one sponsor/day at 15:00 UTC (~11am ET). Skips itself if no FB token,
 // or if a spotlight already went out today (see lib/spotlight.js).
+const cron = require('node-cron');
 if (process.env.FB_PAGE_ACCESS_TOKEN) {
-  const cron = require('node-cron');
   cron.schedule('0 15 * * *', async () => {
     try {
       const r = await require('./lib/spotlight').postNextSpotlight();
@@ -475,6 +475,16 @@ if (process.env.FB_PAGE_ACCESS_TOKEN) {
 } else {
   console.log('⚠️  FB_PAGE_ACCESS_TOKEN not set — daily spotlight disabled');
 }
+// Weekly spotlight status report — Mondays 13:00 UTC (~9am ET)
+cron.schedule('0 13 * * 1', async () => {
+  try {
+    const r = await require('./lib/spotlight').sendWeeklyReport();
+    console.log('[cron] weekly report:', JSON.stringify(r));
+  } catch (e) {
+    console.error('[cron] weekly report failed:', e.message);
+  }
+});
+console.log('📧 Weekly spotlight report scheduled (Mon 13:00 UTC)');
 
 process.on('SIGTERM', () => {
   console.log('SIGTERM received: shutting down');

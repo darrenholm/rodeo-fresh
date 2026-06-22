@@ -66,6 +66,21 @@ router.get('/sponsors', authenticateToken, async (req, res) => {
   }
 });
 
+// Sponsor tiers (Title, Platinum, Gold, …) with their dollar thresholds and
+// rank. Drives the Level dropdown on the sponsors table and the "suggested"
+// tier derived from a sponsor's contribution. Ordered best tier first.
+router.get('/sponsor-levels', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT name, amount, rank FROM sponsor_levels ORDER BY rank'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('GET /sponsor-levels error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Logo coverage report — which sponsors lack a bitmap and/or vector logo.
 // Scoped to a single event year (default current year) so it lists the
 // sponsors actually appearing this season. ?year=all for every sponsor.
@@ -126,13 +141,13 @@ function portalFields(body) {
 
 router.post('/sponsors', authenticateToken, async (req, res) => {
   try {
-    const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, website, notes, paid, in_kind, active } = req.body;
+    const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, website, notes, paid, in_kind, active, sponsor_level } = req.body;
     const pf = portalFields(req.body);
     const result = await pool.query(
-      `INSERT INTO sponsors (name, contact_name, phone, email, city, province, address, postal_code, logo_url, website, notes, paid, in_kind, active, max_guests, allocated_zones, portal_enabled)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+      `INSERT INTO sponsors (name, contact_name, phone, email, city, province, address, postal_code, logo_url, website, notes, paid, in_kind, active, max_guests, allocated_zones, portal_enabled, sponsor_level)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
       [name, contact_name, phone, email, city, province, address, postal_code, logo_url, website || null, notes, paid || false, in_kind || false, active !== false,
-       pf.max_guests, pf.allocated_zones, pf.portal_enabled]
+       pf.max_guests, pf.allocated_zones, pf.portal_enabled, sponsor_level || null]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -143,19 +158,54 @@ router.post('/sponsors', authenticateToken, async (req, res) => {
 
 router.put('/sponsors/:id', authenticateToken, async (req, res) => {
   try {
-    const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, website, notes, paid, in_kind, active } = req.body;
+    const { name, contact_name, phone, email, city, province, address, postal_code, logo_url, website, notes, paid, in_kind, active, sponsor_level } = req.body;
     const pf = portalFields(req.body);
+    // Only touch sponsor_level when the caller actually sends it, so the
+    // existing Edit modal (which omits the field) doesn't wipe a stored tier.
+    const levelProvided = Object.prototype.hasOwnProperty.call(req.body, 'sponsor_level');
     const result = await pool.query(
       `UPDATE sponsors SET name=$1, contact_name=$2, phone=$3, email=$4, city=$5, province=$6,
        address=$7, postal_code=$8, logo_url=$9, website=$10, notes=$11, paid=$12, in_kind=$13, active=$14,
-       max_guests=$15, allocated_zones=$16, portal_enabled=$17, updated_at=NOW()
-       WHERE id=$18 RETURNING *`,
+       max_guests=$15, allocated_zones=$16, portal_enabled=$17,
+       sponsor_level = CASE WHEN $18 THEN $19 ELSE sponsor_level END, updated_at=NOW()
+       WHERE id=$20 RETURNING *`,
       [name, contact_name, phone, email, city, province, address, postal_code, logo_url, website || null, notes, paid || false, in_kind || false, active !== false,
-       pf.max_guests, pf.allocated_zones, pf.portal_enabled, req.params.id]
+       pf.max_guests, pf.allocated_zones, pf.portal_enabled, levelProvided, sponsor_level || null, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(result.rows[0]);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Set just a sponsor's tier — used by the inline Level dropdown on the
+// sponsors table. Kept separate from the full PUT so the frontend can change
+// the level without resending (and risking clobbering) every other field.
+// Send { sponsor_level: 'Gold' } to set, or null/'' to clear. The value must
+// match a row in sponsor_levels (case-insensitive).
+router.put('/sponsors/:id/level', authenticateToken, async (req, res) => {
+  try {
+    const raw = req.body.sponsor_level;
+    let level = null;
+    if (raw != null && String(raw).trim() !== '') {
+      const match = await pool.query(
+        'SELECT name FROM sponsor_levels WHERE lower(name) = lower($1)',
+        [String(raw).trim()]
+      );
+      if (match.rows.length === 0) {
+        return res.status(400).json({ error: `Unknown sponsor level: ${raw}` });
+      }
+      level = match.rows[0].name; // normalize to the canonical casing
+    }
+    const result = await pool.query(
+      'UPDATE sponsors SET sponsor_level = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      [level, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('PUT /sponsors/:id/level error:', err);
     res.status(500).json({ error: err.message });
   }
 });

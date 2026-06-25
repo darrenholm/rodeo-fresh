@@ -1,0 +1,9 @@
+# Install real fonts so sharp/librsvg can render <text> in the sponsor-spotlight
+# card. Without these the container has no fonts and SVG text renders as tofu
+# boxes (□□□) on the posted Facebook image. See lib/spotlight.js.
+[phases.setup]
+aptPkgs = ["...", "fontconfig", "fonts-liberation", "fonts-dejavu-core"]
+
+[phases.fonts]
+dependsOn = ["setup"]
+cmds = ["fc-cache -f"]

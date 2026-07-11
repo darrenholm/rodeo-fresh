@@ -84,10 +84,19 @@ router.get('/:id', authenticateToken, async (req, res) => {
 router.post('/:id/assign', authenticateToken, async (req, res) => {
   try {
     const { id: shiftId } = req.params;
-    const { staff_id, staff_name, assigned_by } = req.body;
-    
+    const { staff_id, staff_name } = req.body;
+
     if (!staff_id || !staff_name) {
       return res.status(400).json({ error: 'Missing staff_id or staff_name' });
+    }
+
+    // Self-service signup is open to all staff; assigning someone ELSE requires admin/manager
+    const userRoles = req.user.roles || [];
+    const isPrivileged = userRoles.includes('admin') || userRoles.includes('manager');
+    const isSelf = String(staff_id) === String(req.user.id);
+
+    if (!isSelf && !isPrivileged) {
+      return res.status(403).json({ error: 'Only admins can assign other staff to shifts' });
     }
     
     // Check if shift exists
@@ -130,10 +139,10 @@ router.post('/:id/assign', authenticateToken, async (req, res) => {
     const assignmentId = 'assignment_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     
     await pool.query(
-      `INSERT INTO shift_assignments 
-       (id, shift_id, staff_id, staff_name, assigned_by, self_assigned) 
+      `INSERT INTO shift_assignments
+       (id, shift_id, staff_id, staff_name, assigned_by, self_assigned)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [assignmentId, shiftId, staff_id, staff_name, assigned_by || staff_id, !assigned_by]
+      [assignmentId, shiftId, staff_id, staff_name, req.user.id, isSelf]
     );
     
     // Get updated shift info
@@ -161,7 +170,15 @@ router.post('/:id/assign', authenticateToken, async (req, res) => {
 router.delete('/:shiftId/assign/:staffId', authenticateToken, async (req, res) => {
   try {
     const { shiftId, staffId } = req.params;
-    
+
+    // Staff can drop their own shifts; removing someone ELSE requires admin/manager
+    const userRoles = req.user.roles || [];
+    const isPrivileged = userRoles.includes('admin') || userRoles.includes('manager');
+
+    if (String(staffId) !== String(req.user.id) && !isPrivileged) {
+      return res.status(403).json({ error: 'Only admins can remove other staff from shifts' });
+    }
+
     const result = await pool.query(
       'DELETE FROM shift_assignments WHERE shift_id = $1 AND staff_id = $2 RETURNING *',
       [shiftId, staffId]

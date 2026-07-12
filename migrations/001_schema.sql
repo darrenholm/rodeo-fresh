@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS shifts (
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
   role VARCHAR(50), -- 'bar', 'gate', etc.
+  persons_required INTEGER DEFAULT 6, -- how many staff this shift needs
   notes TEXT,
   event_id VARCHAR(255) REFERENCES events(id) ON DELETE CASCADE,
   created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -238,6 +238,10 @@ app.use((err, req, res, next) => {
     await mig(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS drinks_used INTEGER DEFAULT 0`);
     await mig(`ALTER TABLE staff ADD COLUMN IF NOT EXISTS wristband_active BOOLEAN DEFAULT false`);
 
+    // Per-shift staffing requirement — how many people each shift needs.
+    // Drives spots_available and the "shift is full" check in routes/shift-routes.js.
+    await mig(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS persons_required INTEGER DEFAULT 6`);
+
     // Sponsor / vendor payment flags (record-level)
     await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS paid BOOLEAN DEFAULT false`);
     await mig(`ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS in_kind BOOLEAN DEFAULT false`);

@@ -3,6 +3,14 @@ const router = express.Router();
 const { Pool } = require('pg');
 const { authenticateToken } = require('../middleware/auth');
 
+// Fallback when a shift predates the persons_required column
+const DEFAULT_PERSONS_REQUIRED = 6;
+
+const personsRequired = (shift) => {
+  const n = parseInt(shift.persons_required);
+  return Number.isInteger(n) && n > 0 ? n : DEFAULT_PERSONS_REQUIRED;
+};
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
@@ -32,8 +40,9 @@ router.get('/', authenticateToken, async (req, res) => {
     // Add assignment counts to shifts
     const shifts = shiftsResult.rows.map(shift => ({
       ...shift,
+      persons_required: personsRequired(shift),
       assigned_count: counts[shift.id] || 0,
-      spots_available: 6 - (counts[shift.id] || 0)
+      spots_available: personsRequired(shift) - (counts[shift.id] || 0)
     }));
     
     res.json(shifts);
@@ -68,9 +77,10 @@ router.get('/:id', authenticateToken, async (req, res) => {
     );
     
     const shift = shiftResult.rows[0];
+    shift.persons_required = personsRequired(shift);
     shift.assigned_staff = assignmentsResult.rows;
     shift.assigned_count = assignmentsResult.rows.length;
-    shift.spots_available = 6 - assignmentsResult.rows.length;
+    shift.spots_available = shift.persons_required - assignmentsResult.rows.length;
     
     res.json(shift);
     
@@ -116,12 +126,13 @@ router.post('/:id/assign', authenticateToken, async (req, res) => {
     );
     
     const currentCount = parseInt(countResult.rows[0].count);
-    
-    if (currentCount >= 6) {
-      return res.status(400).json({ 
+    const maxCapacity = personsRequired(shiftResult.rows[0]);
+
+    if (currentCount >= maxCapacity) {
+      return res.status(400).json({
         error: 'Shift is full',
         assigned_count: currentCount,
-        max_capacity: 6
+        max_capacity: maxCapacity
       });
     }
     
@@ -157,7 +168,7 @@ router.post('/:id/assign', authenticateToken, async (req, res) => {
       success: true,
       assignment_id: assignmentId,
       assigned_count: parseInt(updatedCountResult.rows[0].count),
-      spots_available: 6 - parseInt(updatedCountResult.rows[0].count)
+      spots_available: maxCapacity - parseInt(updatedCountResult.rows[0].count)
     });
     
   } catch (error) {
@@ -193,14 +204,20 @@ router.delete('/:shiftId/assign/:staffId', authenticateToken, async (req, res) =
       'SELECT COUNT(*) FROM shift_assignments WHERE shift_id = $1',
       [shiftId]
     );
-    
+
+    const shiftRow = await pool.query(
+      'SELECT persons_required FROM shifts WHERE id = $1',
+      [shiftId]
+    );
+    const maxCapacity = shiftRow.rows.length ? personsRequired(shiftRow.rows[0]) : DEFAULT_PERSONS_REQUIRED;
+
     console.log(`✓ Removed ${result.rows[0].staff_name} from shift ${shiftId}`);
-    
+
     res.json({
       success: true,
       removed: result.rows[0],
       assigned_count: parseInt(countResult.rows[0].count),
-      spots_available: 6 - parseInt(countResult.rows[0].count)
+      spots_available: maxCapacity - parseInt(countResult.rows[0].count)
     });
     
   } catch (error) {
@@ -209,15 +226,23 @@ router.delete('/:shiftId/assign/:staffId', authenticateToken, async (req, res) =
   }
 });
 
+// Parse a persons_required value from a request body; returns null if absent/invalid
+const parsePersonsRequired = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  const n = parseInt(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
+
 // POST create shift
 router.post('/', authenticateToken, async (req, res) => {
   const { staff_name, staff_id, date, start_time, end_time, role, notes, event_id } = req.body;
+  const persons_required = parsePersonsRequired(req.body.persons_required) || DEFAULT_PERSONS_REQUIRED;
   try {
     const id = `shift_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const result = await pool.query(
-      `INSERT INTO shifts (id, staff_name, staff_id, date, start_time, end_time, role, notes, event_id, created_date, updated_date, created_by_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW(), $10, $11) RETURNING *`,
-      [id, staff_name, staff_id, date, start_time, end_time, role, notes, event_id, req.user.userId || req.user.id, req.user.email]
+      `INSERT INTO shifts (id, staff_name, staff_id, date, start_time, end_time, role, persons_required, notes, event_id, created_date, updated_date, created_by_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW(), $11, $12) RETURNING *`,
+      [id, staff_name, staff_id, date, start_time, end_time, role, persons_required, notes, event_id, req.user.userId || req.user.id, req.user.email]
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -229,11 +254,13 @@ router.post('/', authenticateToken, async (req, res) => {
 // PUT update shift
 router.put('/:id', authenticateToken, async (req, res) => {
   const { staff_name, staff_id, date, start_time, end_time, role, notes, event_id } = req.body;
+  // COALESCE keeps the stored value when the client omits persons_required
+  const persons_required = parsePersonsRequired(req.body.persons_required);
   try {
     const result = await pool.query(
-      `UPDATE shifts SET staff_name = $1, staff_id = $2, date = $3, start_time = $4, end_time = $5, role = $6, notes = $7, event_id = $8, updated_date = NOW()
-       WHERE id = $9 RETURNING *`,
-      [staff_name, staff_id, date, start_time, end_time, role, notes, event_id, req.params.id]
+      `UPDATE shifts SET staff_name = $1, staff_id = $2, date = $3, start_time = $4, end_time = $5, role = $6, persons_required = COALESCE($7, persons_required), notes = $8, event_id = $9, updated_date = NOW()
+       WHERE id = $10 RETURNING *`,
+      [staff_name, staff_id, date, start_time, end_time, role, persons_required, notes, event_id, req.params.id]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Shift not found' });

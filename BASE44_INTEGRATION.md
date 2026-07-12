@@ -525,6 +525,11 @@ export const api = {
   // --------------------------------------
   // SHIFTS
   // --------------------------------------
+  // Shifts carry a persons_required field (integer, default 6) — the number
+  // of staff needed. Include it in createShift/updateShift payloads to set it.
+  // getShifts responses return persons_required, assigned_count and
+  // spots_available per shift; signups are rejected once assigned_count
+  // reaches persons_required.
   
   getShifts: async (filters = {}) => {
     const params = new URLSearchParams(filters);

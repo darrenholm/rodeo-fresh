@@ -97,6 +97,7 @@ const transformers = {
     start_time: row.start_time,
     end_time: row.end_time,
     role: row.role || null,
+    persons_required: parseInt(row.persons_required) > 0 ? parseInt(row.persons_required) : 6,
     notes: row.notes || null,
     event_id: row.event_id || null,
     created_date: row.created_date,
@@ -105,7 +106,7 @@ const transformers = {
     created_by: row.created_by,
     is_sample: row.is_sample === 'true'
   }),
-  
+
   ticket_orders: (row) => ({
     id: row.id,
     event_id: row.event_id || null,

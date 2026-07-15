@@ -26,6 +26,7 @@ module.exports = function(pool) {
         );
       `);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_merch_sales_created ON merch_sales(created_at DESC)`);
+      await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS variant_stock JSONB`);
       console.log('[merch-sales] Table ready');
     } catch (err) {
       console.error('[merch-sales] Table setup error:', err.message);
@@ -56,6 +57,17 @@ module.exports = function(pool) {
             `UPDATE products SET stock = GREATEST(0, stock - $1), updated_date = NOW() WHERE id = $2`,
             [item.qty, item.productId]
           );
+          // Per-variant stock: key is "Color|Size", or just the color/size when only one applies
+          const vkey = item.color && item.size ? `${item.color}|${item.size}` : (item.color || item.size || null);
+          if (vkey) {
+            await pool.query(
+              `UPDATE products
+               SET variant_stock = jsonb_set(variant_stock, ARRAY[$1],
+                     to_jsonb(GREATEST(0, COALESCE((variant_stock->>$1)::int, 0) - $2)))
+               WHERE id = $3 AND variant_stock IS NOT NULL AND variant_stock ? $1`,
+              [vkey, item.qty, item.productId]
+            );
+          }
         }
       }
 

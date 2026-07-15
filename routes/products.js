@@ -44,13 +44,13 @@ router.get('/:id', async (req, res) => {
 
 // POST create product
 router.post('/', authenticateToken, requireAdmin, async (req, res) => {
-  const { name, description, category, price, image_url, stripe_price_id, sizes, colors, stock, weight, length, width, height } = req.body;
+  const { name, description, category, price, image_url, stripe_price_id, sizes, colors, stock, weight, length, width, height, variant_stock } = req.body;
   try {
     const id = `product_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const result = await pool.query(
-      `INSERT INTO products (id, name, description, category, price, image_url, stripe_price_id, sizes, colors, stock, weight, length, width, height, created_date, updated_date, created_by_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW(), $15, $16) RETURNING *`,
-      [id, name, description, category, price, image_url, stripe_price_id, JSON.stringify(sizes), JSON.stringify(colors), stock, weight, length, width, height, req.user.userId, req.user.email]
+      `INSERT INTO products (id, name, description, category, price, image_url, stripe_price_id, sizes, colors, stock, weight, length, width, height, variant_stock, created_date, updated_date, created_by_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW(), $16, $17) RETURNING *`,
+      [id, name, description, category, price, image_url, stripe_price_id, JSON.stringify(sizes), JSON.stringify(colors), stock, weight, length, width, height, variant_stock ? JSON.stringify(variant_stock) : null, req.user.userId, req.user.email]
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -60,12 +60,12 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
 
 // PUT update product
 router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
-  const { name, description, category, price, image_url, stripe_price_id, sizes, colors, stock, weight, length, width, height } = req.body;
+  const { name, description, category, price, image_url, stripe_price_id, sizes, colors, stock, weight, length, width, height, variant_stock } = req.body;
   try {
     const result = await pool.query(
-      `UPDATE products SET name = $1, description = $2, category = $3, price = $4, image_url = $5, stripe_price_id = $6, sizes = $7, colors = $8, stock = $9, weight = $10, length = $11, width = $12, height = $13, updated_date = NOW()
-       WHERE id = $14 RETURNING *`,
-      [name, description, category, price, image_url, stripe_price_id, JSON.stringify(sizes), JSON.stringify(colors), stock, weight, length, width, height, req.params.id]
+      `UPDATE products SET name = $1, description = $2, category = $3, price = $4, image_url = $5, stripe_price_id = $6, sizes = $7, colors = $8, stock = $9, weight = $10, length = $11, width = $12, height = $13, variant_stock = $14, updated_date = NOW()
+       WHERE id = $15 RETURNING *`,
+      [name, description, category, price, image_url, stripe_price_id, JSON.stringify(sizes), JSON.stringify(colors), stock, weight, length, width, height, variant_stock ? JSON.stringify(variant_stock) : null, req.params.id]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Product not found' });

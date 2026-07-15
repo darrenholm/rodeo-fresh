@@ -426,6 +426,22 @@ app.use((err, req, res, next) => {
     `);
     await mig(`CREATE INDEX IF NOT EXISTS idx_sponsor_guests_sponsor ON sponsor_guests(sponsor_id)`);
 
+    // Stripe Terminal top-up history — routes/stripe.js inserts here but the
+    // table was never created anywhere, so records silently no-op'd.
+    await mig(`
+      CREATE TABLE IF NOT EXISTS stripe_payments (
+        payment_intent_id VARCHAR(255) PRIMARY KEY,
+        rfid_uid          VARCHAR(255) DEFAULT '',
+        tickets           INTEGER DEFAULT 0,
+        amount            INTEGER DEFAULT 0,          -- cents, from Stripe
+        status            VARCHAR(50) DEFAULT 'captured',
+        refunded          BOOLEAN DEFAULT FALSE,
+        refund_id         VARCHAR(255),
+        created_at        TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_stripe_payments_rfid ON stripe_payments(rfid_uid)`);
+
     console.log('✓ Auto-migrations complete');
   } catch (e) {
     console.error('⚠️  Auto-migration block error (unexpected):', e.message);

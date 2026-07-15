@@ -8,3 +8,6 @@ seed-*.js
 reset-*.js
 0[0-9]-*.js
 scripts/out/
+
+scripts/onsite/onsite.env
+scripts/onsite/CUTOVER_TIME.txt

@@ -1,0 +1,24 @@
+# Onsite Caddy config — Mini PC serves the staff portal + API over HTTPS
+# with real Let's Encrypt certs issued via manual DNS-01 (see README).
+
+{
+	auto_https off
+}
+
+https://staff.holmdalerodeo.ca {
+	tls C:/rodeo/certs/staff.crt C:/rodeo/certs/staff.key
+	root * C:/rodeo/holmdale-staff-portal/public
+	file_server
+	# menu page lives at / -> index.html
+	try_files {path} {path}.html /index.html
+}
+
+https://api.holmdalerodeo.ca {
+	tls C:/rodeo/certs/api.crt C:/rodeo/certs/api.key
+	reverse_proxy localhost:3000
+}
+
+# plain-HTTP redirect so typed URLs still land somewhere sane
+http://staff.holmdalerodeo.ca, http://api.holmdalerodeo.ca {
+	redir https://{host}{uri} permanent
+}

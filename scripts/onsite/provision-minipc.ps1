@@ -35,10 +35,10 @@ Set-Location "$ROOT\rodeo-fresh"; npm install --omit=dev
 # ---- 3. Database ----
 Write-Host @"
 
-MANUAL STEP — create the database (Postgres asked for a superuser password during install):
+MANUAL STEP - create the database (Postgres asked for a superuser password during install):
   & 'C:\Program Files\PostgreSQL\16\bin\psql' -U postgres -c "CREATE DATABASE rodeo"
 
-MANUAL STEP — secrets:
+MANUAL STEP - secrets:
   1. Copy $ROOT\rodeo-fresh\scripts\onsite\onsite.env.example -> onsite.env and fill in
      (CLOUD_DATABASE_URL from Railway Postgres 'DATABASE_PUBLIC_URL'; local URL with your postgres password)
   2. Create $ROOT\rodeo-fresh\.env with:
@@ -51,6 +51,9 @@ MANUAL STEP — secrets:
 "@ -ForegroundColor Yellow
 
 # ---- 4. Services (run after the manual steps above) ----
+# (plain if/else rather than ?. / ?? so this parses on Windows PowerShell 5.1)
+$caddyCmd = Get-Command caddy -ErrorAction SilentlyContinue
+$caddyExe = if ($caddyCmd) { $caddyCmd.Source } else { 'C:\Program Files\Caddy\caddy.exe' }
 Write-Host @"
 Then register services (as admin):
 
@@ -60,7 +63,7 @@ Then register services (as admin):
   nssm set RodeoAPI Start SERVICE_AUTO_START
   nssm start RodeoAPI
 
-  nssm install RodeoCaddy "$((Get-Command caddy -ErrorAction SilentlyContinue)?.Source ?? 'C:\Program Files\Caddy\caddy.exe')" "run --config $ROOT\rodeo-fresh\scripts\onsite\Caddyfile"
+  nssm install RodeoCaddy "$caddyExe" "run --config $ROOT\rodeo-fresh\scripts\onsite\Caddyfile"
   nssm set RodeoCaddy AppDirectory "$ROOT"
   nssm set RodeoCaddy Start SERVICE_AUTO_START
   nssm start RodeoCaddy
@@ -83,4 +86,4 @@ Firewall:
   netsh advfirewall firewall add rule name="Rodeo DNS" dir=in action=allow protocol=UDP localport=53
 "@ -ForegroundColor Yellow
 
-Write-Host "Provisioning bootstrap done — work through the yellow manual steps above." -ForegroundColor Green
+Write-Host "Provisioning bootstrap done - work through the yellow manual steps above." -ForegroundColor Green

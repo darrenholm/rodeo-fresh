@@ -1,7 +1,36 @@
 const express = require('express');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const pool = require('../config/database');
+const QRCode = require('qrcode');
 const router = express.Router();
+
+// GET /:code/qr.png — public hosted QR for ticket emails.
+// Gmail strips data: URI images, so confirmation emails reference this URL
+// instead. Knowing the confirmation code IS the credential, same as the QR.
+router.get('/:code/qr.png', async (req, res) => {
+  try {
+    const code = String(req.params.code || '').toUpperCase();
+    if (!/^[A-Z0-9-]{4,32}$/.test(code)) {
+      return res.status(400).send('Invalid code');
+    }
+    const exists = await pool.query(
+      'SELECT 1 FROM ticket_orders WHERE confirmation_code = $1 LIMIT 1', [code]
+    );
+    if (exists.rows.length === 0) {
+      return res.status(404).send('Not found');
+    }
+    const png = await QRCode.toBuffer(code, {
+      width: 360, margin: 2,
+      color: { dark: '#000000', light: '#ffffff' }
+    });
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(png);
+  } catch (error) {
+    console.error('QR render error:', error);
+    res.status(500).send('QR error');
+  }
+});
 
 // GET all ticket orders
 router.get('/', authenticateToken, async (req, res) => {

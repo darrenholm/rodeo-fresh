@@ -226,10 +226,9 @@ router.post('/confirm-payment', async (req, res) => {
         const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [checkoutData.eventId]);
         const event = eventResult.rows.length > 0 ? eventResult.rows[0] : null;
 
-        const qrDataUrl = await QRCode.toDataURL(confirmation_code, {
-          width: 200, margin: 2,
-          color: { dark: '#000000', light: '#ffffff' }
-        });
+        // Hosted QR URL — Gmail strips data: URI images, so the QR must be a
+        // remote image (served by routes/ticketOrders.js /:code/qr.png)
+        const qrDataUrl = `${process.env.PUBLIC_API_URL || 'https://api.holmdalerodeo.ca'}/api/ticket-orders/${encodeURIComponent(confirmation_code)}/qr.png`;
 
         const eventDate = event
           ? new Date(event.date).toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })

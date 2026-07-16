@@ -42,18 +42,14 @@ async function sendEmail({ to, subject, html, reply_to, attachments, from: fromO
   return data;
 }
 
-// ✅ FIX: Generate inline base64 QR code — works in all email clients
-async function generateQRCodeDataUrl(text) {
-  return await QRCode.toDataURL(text, {
-    width: 200,
-    margin: 2,
-    color: { dark: '#000000', light: '#ffffff' }
-  });
+// Hosted QR URL — data: URI images get stripped by Gmail, so emails must
+// reference the public endpoint in routes/ticketOrders.js (/:code/qr.png)
+function qrImageUrl(code) {
+  return `${process.env.PUBLIC_API_URL || 'https://api.holmdalerodeo.ca'}/api/ticket-orders/${encodeURIComponent(code)}/qr.png`;
 }
 
-// ✅ FIX: Now async because QR generation is async
 async function buildTicketEmailHtml(ticket, event) {
-  const qrDataUrl = await generateQRCodeDataUrl(ticket.confirmation_code);
+  const qrDataUrl = qrImageUrl(ticket.confirmation_code);
 
   const eventDate = event
     ? new Date(event.date).toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })

@@ -80,6 +80,18 @@ router.post('/serve', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Age not verified' });
     }
 
+    // AGCO responsible-service cap: max 2 alcohol servings per visit. The visit
+    // counter is reset when staff scans the band (POST /wristbands/start-visit).
+    const VISIT_DRINK_LIMIT = 2;
+    const servedThisVisit = band.visit_drink_count || 0;
+    if (servedThisVisit >= VISIT_DRINK_LIMIT) {
+      return res.status(403).json({
+        error: `Limit reached: ${VISIT_DRINK_LIMIT} drinks per visit. Re-scan the wristband for another round.`,
+        limit_reached: true,
+        visit_drink_count: servedThisVisit
+      });
+    }
+
     // Check credits
     const bandCredits = parseFloat(band.credits);
     const drinkPrice = parseFloat(drink.price);
@@ -91,11 +103,12 @@ router.post('/serve', authenticateToken, async (req, res) => {
       });
     }
 
-    // Deduct credits from wristband (case insensitive)
+    // Deduct credits from wristband + increment the per-visit serving counter
     await pool.query(
-      `UPDATE wristbands 
+      `UPDATE wristbands
        SET credits = credits - $1,
-           credits_spent = credits_spent + $1
+           credits_spent = credits_spent + $1,
+           visit_drink_count = COALESCE(visit_drink_count, 0) + 1
        WHERE UPPER(rfid_uid) = UPPER($2)`,
       [drink.price, rfid_uid]
     );

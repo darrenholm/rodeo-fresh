@@ -311,6 +311,10 @@ app.use((err, req, res, next) => {
     await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS printed_at TIMESTAMP`);
     await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)`);  // staff who created the badge (POST /api/badges)
     await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS created_date TIMESTAMP DEFAULT NOW()`);
+    // AGCO responsible-service: max 2 alcohol servings per bar visit. Counter is
+    // reset each time staff scans the band (POST /wristbands/start-visit) and
+    // incremented per serve; a 3rd serve is rejected until the band is re-scanned.
+    await mig(`ALTER TABLE wristbands ADD COLUMN IF NOT EXISTS visit_drink_count INTEGER DEFAULT 0`);
     await mig(`CREATE INDEX IF NOT EXISTS idx_wristbands_badge_type ON wristbands(badge_type)`);
     await mig(`CREATE INDEX IF NOT EXISTS idx_wristbands_print_status ON wristbands(print_status)`);
 

@@ -275,10 +275,12 @@ router.post('/cancel-drink', authenticateToken, async (req, res) => {
     if (!rfid_uid) return res.status(400).json({ error: 'Missing rfid_uid' });
 
     const uid = normalizeUid(rfid_uid);
+    // Refund credits and free up one slot in the per-visit serving counter.
     const result = await pool.query(
       `UPDATE wristbands
        SET credits = credits + $1,
-           credits_spent = GREATEST(0, credits_spent - $1)
+           credits_spent = GREATEST(0, credits_spent - $1),
+           visit_drink_count = GREATEST(0, COALESCE(visit_drink_count, 0) - 1)
        WHERE UPPER(rfid_uid) = $2 RETURNING *`,
       [amount, uid]
     );
@@ -290,6 +292,29 @@ router.post('/cancel-drink', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error cancelling drink:', error);
     res.status(500).json({ error: 'Failed to cancel drink' });
+  }
+});
+
+// POST start a bar visit — resets the per-visit serving counter to 0.
+// Called by the bar POS every time staff scans/loads a customer's wristband,
+// so each fresh scan allows up to the AGCO limit of servings again.
+router.post('/start-visit', authenticateToken, async (req, res) => {
+  try {
+    const { rfid_uid } = req.body;
+    if (!rfid_uid) return res.status(400).json({ error: 'Missing rfid_uid' });
+
+    const uid = normalizeUid(rfid_uid);
+    const result = await pool.query(
+      `UPDATE wristbands SET visit_drink_count = 0
+       WHERE UPPER(rfid_uid) = $1 RETURNING rfid_uid, visit_drink_count`,
+      [uid]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Wristband not found' });
+
+    res.json({ success: true, visit_drink_count: 0 });
+  } catch (error) {
+    console.error('Error starting visit:', error);
+    res.status(500).json({ error: 'Failed to start visit' });
   }
 });
 

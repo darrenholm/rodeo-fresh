@@ -28,6 +28,7 @@ const productRoutes = require('./routes/products');
 const orderRoutes = require('./routes/orders');
 const dashboardRoutes = require('./routes/dashboard');
 const sponsorsVendorsRoutes = require('./routes/sponsors-vendors');
+const signsRoutes = require('./routes/signs');
 const sponsorPortalRoutes = require('./routes/sponsors-portal');
 const sponsorLogosRoutes = require('./routes/sponsorLogos');
 const vendorLogosRoutes = require('./routes/vendorLogos');
@@ -150,6 +151,7 @@ app.use('/api/merch', merchRoutes);
 
 // Sponsors & Vendors
 app.use('/api', sponsorsVendorsRoutes);
+app.use('/api/signs', signsRoutes);
 app.use('/api/sponsor-portal', sponsorPortalRoutes);
 app.use('/api/sponsor-logos', sponsorLogosRoutes);
 app.use('/api/sponsor-intake', require('./routes/sponsor-intake'));
@@ -446,6 +448,46 @@ app.use((err, req, res, next) => {
     `);
     await mig(`CREATE INDEX IF NOT EXISTS idx_stripe_payments_rfid ON stripe_payments(rfid_uid)`);
 
+    // ── Sign inventory ──
+    // Physical signs on site. sign_locations (roadside directional signs) is
+    // guarded here too so the signs FK below always has a target on a fresh
+    // database — in production the table already exists.
+    await mig(`
+      CREATE TABLE IF NOT EXISTS sign_locations (
+        id           SERIAL PRIMARY KEY,
+        location     VARCHAR(255),
+        cross_street VARCHAR(255),
+        installed    BOOLEAN DEFAULT false,
+        install_date DATE,
+        removed      BOOLEAN DEFAULT false
+      )
+    `);
+    await mig(`
+      CREATE TABLE IF NOT EXISTS signs (
+        id               SERIAL PRIMARY KEY,
+        name             VARCHAR(255) NOT NULL,                        -- what the sign is / says
+        category         VARCHAR(20) NOT NULL DEFAULT 'operations'
+                         CHECK (category IN ('sponsor','vendor','operations')),
+        sponsor_id       INTEGER REFERENCES sponsors(id)       ON DELETE SET NULL,  -- when category = sponsor
+        vendor_id        INTEGER REFERENCES vendors(id)        ON DELETE SET NULL,  -- when category = vendor
+        sign_location_id INTEGER REFERENCES sign_locations(id) ON DELETE SET NULL,  -- roadside directional signs
+        size             VARCHAR(100),
+        material         VARCHAR(100),
+        quantity         INTEGER NOT NULL DEFAULT 1,
+        condition        VARCHAR(30),
+        site_location    VARCHAR(255),                                 -- where it's used on site
+        storage_location VARCHAR(255),                                 -- where it lives off-season
+        notes            TEXT,
+        active           BOOLEAN DEFAULT true,
+        created_at       TIMESTAMP DEFAULT NOW(),
+        updated_at       TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_signs_category ON signs(category)`);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_signs_sponsor  ON signs(sponsor_id)`);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_signs_vendor   ON signs(vendor_id)`);
+    await mig(`CREATE INDEX IF NOT EXISTS idx_signs_location ON signs(sign_location_id)`);
+
     console.log('✓ Auto-migrations complete');
   } catch (e) {
     console.error('⚠️  Auto-migration block error (unexpected):', e.message);
@@ -480,6 +522,7 @@ app.listen(PORT, () => {
   console.log('   /api/events            — rodeo events');
   console.log('   /api/sponsors          — sponsors CRUD');
   console.log('   /api/vendors           — vendors CRUD + public registration');
+  console.log('   /api/signs             — sign inventory (sponsor/vendor/operations)');
   console.log('   /api/sponsor-logos     — sponsor logo uploads (Vercel Blob)');
   console.log('   /api/vendor-logos      — vendor logo uploads (Vercel Blob)');
   console.log(`[blob] Token loaded: ${(process.env.BLOB_READ_WRITE_TOKEN || 'MISSING').slice(0, 25)}...`);

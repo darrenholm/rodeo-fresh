@@ -8,7 +8,6 @@ if (!process.env.JWT_SECRET) {
 }
 
 const express = require('express');
-const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const pool = require('./config/database');
@@ -71,13 +70,6 @@ const app = express();
 // ============================================
 // MIDDLEWARE
 // ============================================
-
-// Staff portal — served from the API deploy as well, so the pages in this
-// repo are always reachable at <railway-url>/portal/ even when the Vercel
-// copy behind staff.holmdalerodeo.ca hasn't been redeployed yet. Mounted
-// before helmet: its default CSP blocks the portal pages' inline scripts,
-// and these pages are served without CSP on the Vercel host today.
-app.use('/portal', express.static(path.join(__dirname, 'staff-portal'), { index: 'index.html' }));
 
 app.use(helmet());
 app.use(cors({

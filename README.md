@@ -2,6 +2,12 @@
 
 Complete Node.js/Express backend for the Holmdale Rodeo Event Management & E-commerce Platform.
 
+> **Staff portal lives elsewhere:** the pages behind staff.holmdalerodeo.ca are in the
+> [`darrenholm/holmdale-staff-portal`](https://github.com/darrenholm/holmdale-staff-portal)
+> repo (`public/`), deployed by Vercel on push to its `main`. Do not add portal HTML to
+> this repo — a stale `staff-portal/` copy here caused portal changes to silently never
+> reach the live site, and was removed for that reason.
+
 ## 📋 System Overview
 
 This backend powers a rodeo event management system with:

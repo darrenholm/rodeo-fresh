@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign Inventory - Holmdale Pro Rodeo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #00B74A 0%, #2A2A2A 100%); min-height: 100vh; padding: 20px; display: flex; align-items: flex-start; justify-content: center; }
+    .container { max-width: 1200px; width: 100%; padding-top: 20px; }
+    .header { background: white; padding: 24px 30px; border-radius: 15px; margin-bottom: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); text-align: center; }
+    .header h1 { color: #00B74A; font-size: 28px; font-weight: bold; margin-bottom: 6px; }
+    .header p { color: #666; font-size: 15px; }
+    .back-link { display: inline-block; margin-bottom: 16px; color: white; text-decoration: none; font-size: 14px; opacity: 0.85; }
+    .back-link:hover { opacity: 1; }
+    .login-card { background: white; border-radius: 15px; padding: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); margin-bottom: 20px; max-width: 440px; margin-left: auto; margin-right: auto; }
+    .login-card h2 { color: #333; font-size: 18px; margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; color: #555; margin-bottom: 5px; }
+    .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; font-family: inherit; }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: #00B74A; }
+    .btn { padding: 10px 18px; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; }
+    .btn-green { background: #00B74A; color: white; }
+    .btn-green:hover { background: #009d3f; }
+    .btn-grey { background: #f3f4f6; color: #374151; }
+    .btn-grey:hover { background: #e5e7eb; }
+    .btn-red { background: #fee2e2; color: #b91c1c; }
+    .btn-login { width: 100%; padding: 12px; background: #00B74A; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer; }
+    .btn-login:hover { background: #009d3f; }
+    .error-msg { color: #dc2626; font-size: 13px; margin-top: 10px; text-align: center; }
+    .app { display: none; }
+    .summary-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+    .stat { background: white; border-radius: 12px; padding: 14px 20px; box-shadow: 0 6px 18px rgba(0,0,0,0.15); min-width: 130px; flex: 1; }
+    .stat .num { font-size: 26px; font-weight: 800; color: #00B74A; }
+    .stat .lbl { font-size: 12px; color: #777; margin-top: 2px; }
+    .stat.warn .num { color: #d97706; }
+    .toolbar { background: white; border-radius: 12px; padding: 14px 18px; box-shadow: 0 6px 18px rgba(0,0,0,0.15); margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .chip { padding: 7px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; cursor: pointer; background: #f3f4f6; color: #444; border: none; }
+    .chip.on { background: #00B74A; color: white; }
+    .toolbar .spacer { flex: 1; }
+    .table-card { background: white; border-radius: 15px; padding: 20px 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 10px 8px; color: #555; border-bottom: 2px solid #eee; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap; }
+    td { padding: 10px 8px; border-bottom: 1px solid #f3f3f3; vertical-align: top; }
+    tr:hover td { background: #fafcf9; }
+    .cat { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .cat.sponsor { background: #d1fae5; color: #065f46; }
+    .cat.vendor { background: #dbeafe; color: #1e40af; }
+    .cat.operations { background: #f3f4f6; color: #4b5563; }
+    .linked { color: #00875a; font-weight: 600; }
+    .muted { color: #aaa; }
+    .cond-Needs, .cond-Replace { color: #b91c1c; font-weight: 700; }
+    .cond-Fair { color: #d97706; font-weight: 600; }
+    .row-actions { white-space: nowrap; }
+    .row-actions button { margin-left: 4px; padding: 5px 10px; font-size: 12px; }
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: flex-start; justify-content: center; z-index: 50; padding: 30px 16px; overflow-y: auto; }
+    .modal { background: white; border-radius: 15px; padding: 26px 28px; width: 100%; max-width: 640px; box-shadow: 0 20px 50px rgba(0,0,0,0.35); }
+    .modal h2 { font-size: 19px; color: #222; margin-bottom: 18px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+    .toast { position: fixed; bottom: 24px; right: 24px; background: #1a1a1a; color: white; padding: 12px 20px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 999; }
+    .toast.show { opacity: 1; }
+    .loading { text-align: center; color: #888; padding: 30px; font-size: 14px; }
+    @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="container">
+  <a href="index.html" class="back-link">&larr; Back to Staff Portal</a>
+  <div class="header">
+    <h1>🪧 Sign Inventory</h1>
+    <p>Sponsor, vendor and operations signage — sizes, materials and where everything lives</p>
+  </div>
+
+  <div class="login-card" id="loginCard">
+    <h2>Staff Sign In</h2>
+    <div class="form-group"><label>Email</label><input type="email" id="emailInput" placeholder="admin@holmdalerodeo.ca" /></div>
+    <div class="form-group"><label>Password</label><input type="password" id="passwordInput" placeholder="Password" /></div>
+    <button class="btn-login" onclick="login()">Sign In</button>
+    <div class="error-msg" id="loginError"></div>
+  </div>
+
+  <div class="app" id="app">
+    <div class="summary-row" id="summaryRow"></div>
+
+    <div class="toolbar">
+      <button class="chip on" data-cat="" onclick="setFilter(this)">All</button>
+      <button class="chip" data-cat="sponsor" onclick="setFilter(this)">Sponsor</button>
+      <button class="chip" data-cat="vendor" onclick="setFilter(this)">Vendor</button>
+      <button class="chip" data-cat="operations" onclick="setFilter(this)">Operations</button>
+      <div class="spacer"></div>
+      <button class="btn btn-grey" onclick="seedDefaults()">Load standard checklist</button>
+      <button class="btn btn-green" onclick="openModal()">+ Add Sign</button>
+    </div>
+
+    <div class="table-card">
+      <table>
+        <thead>
+          <tr>
+            <th>Sign</th><th>Category</th><th>Sponsor / Vendor</th><th>Road Location</th>
+            <th>Size</th><th>Material</th><th>Qty</th><th>Condition</th>
+            <th>On-Site</th><th>Stored At</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="signsBody"><tr><td colspan="11" class="loading">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h2 id="modalTitle">Add Sign</h2>
+    <div class="form-group"><label>Sign / what it says *</label><input id="fName" placeholder="e.g. Beer garden banner" /></div>
+    <div class="grid2">
+      <div class="form-group"><label>Category *</label>
+        <select id="fCategory" onchange="onCategoryChange()">
+          <option value="operations">Operations</option>
+          <option value="sponsor">Sponsor</option>
+          <option value="vendor">Vendor</option>
+        </select>
+      </div>
+      <div class="form-group" id="gSponsor" style="display:none"><label>Sponsor</label><select id="fSponsor"></select></div>
+      <div class="form-group" id="gVendor" style="display:none"><label>Vendor</label><select id="fVendor"></select></div>
+      <div class="form-group"><label>Roadside directional location (optional)</label><select id="fSignLocation"></select></div>
+      <div class="form-group"><label>Size</label><input id="fSize" list="sizeList" placeholder='e.g. 4 ft x 8 ft' /><datalist id="sizeList"></datalist></div>
+      <div class="form-group"><label>Material</label><input id="fMaterial" list="materialList" placeholder="e.g. Coroplast" /><datalist id="materialList"></datalist></div>
+      <div class="form-group"><label>Quantity</label><input id="fQuantity" type="number" min="0" value="1" /></div>
+      <div class="form-group"><label>Condition</label><select id="fCondition"><option value=""></option></select></div>
+      <div class="form-group"><label>Where it's used on site</label><input id="fSiteLocation" placeholder="e.g. Beer garden fence, north side" /></div>
+      <div class="form-group"><label>Stored at (off-season)</label><input id="fStorage" placeholder="e.g. Holm barn loft" /></div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="fNotes" rows="2"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-grey" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-green" onclick="saveSign()" id="saveBtn">Save Sign</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+  var API = 'https://rodeo-fresh-production-7348.up.railway.app/api';
+  var authToken = null;
+  var signs = [], sponsors = [], vendors = [], signLocations = [], options = {};
+  var filterCat = '', editingId = null;
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+  function toast(msg) { var t = $('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function(){ t.classList.remove('show'); }, 2500); }
+  function hdrs() { return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authToken }; }
+
+  async function login() {
+    var email = $('emailInput').value.trim();
+    var password = $('passwordInput').value;
+    $('loginError').textContent = '';
+    try {
+      var res = await fetch(API + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email, password: password }) });
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Login failed');
+      authToken = data.token;
+      $('loginCard').style.display = 'none';
+      $('app').style.display = 'block';
+      await loadReferenceData();
+      await refresh();
+    } catch (e) { $('loginError').textContent = e.message; }
+  }
+  $('passwordInput').addEventListener('keydown', function(e){ if (e.key === 'Enter') login(); });
+
+  async function loadReferenceData() {
+    var results = await Promise.all([
+      fetch(API + '/signs/options', { headers: hdrs() }).then(function(r){ return r.json(); }),
+      fetch(API + '/sponsors', { headers: hdrs() }).then(function(r){ return r.ok ? r.json() : []; }),
+      fetch(API + '/vendors', { headers: hdrs() }).then(function(r){ return r.ok ? r.json() : []; }),
+      fetch(API + '/sign-locations', { headers: hdrs() }).then(function(r){ return r.ok ? r.json() : []; })
+    ]);
+    options = results[0]; sponsors = results[1]; vendors = results[2]; signLocations = results[3];
+
+    $('sizeList').innerHTML = (options.sizes || []).map(function(s){ return '<option value="' + esc(s) + '">'; }).join('');
+    $('materialList').innerHTML = (options.materials || []).map(function(s){ return '<option value="' + esc(s) + '">'; }).join('');
+    $('fCondition').innerHTML = '<option value=""></option>' + (options.conditions || []).map(function(c){ return '<option>' + esc(c) + '</option>'; }).join('');
+    $('fSponsor').innerHTML = '<option value="">— not linked —</option>' + sponsors.map(function(s){ return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('');
+    $('fVendor').innerHTML = '<option value="">— not linked —</option>' + vendors.map(function(v){ return '<option value="' + v.id + '">' + esc(v.name) + '</option>'; }).join('');
+    $('fSignLocation').innerHTML = '<option value="">— none / not a road sign —</option>' + signLocations.map(function(l){
+      return '<option value="' + l.id + '">' + esc(l.location + (l.cross_street ? ' @ ' + l.cross_street : '')) + '</option>';
+    }).join('');
+  }
+
+  async function refresh() {
+    var url = API + '/signs' + (filterCat ? '?category=' + filterCat : '');
+    var res = await Promise.all([
+      fetch(url, { headers: hdrs() }).then(function(r){ return r.json(); }),
+      fetch(API + '/signs/summary', { headers: hdrs() }).then(function(r){ return r.json(); })
+    ]);
+    signs = res[0];
+    renderSummary(res[1]);
+    renderTable();
+  }
+
+  function renderSummary(sm) {
+    var byCat = {};
+    (sm.by_category || []).forEach(function(r){ byCat[r.category] = r; });
+    var attention = (sm.by_condition || []).filter(function(r){ return r.condition === 'Needs repair' || r.condition === 'Replace'; })
+      .reduce(function(a, r){ return a + r.line_items; }, 0);
+    function stat(num, lbl, warn) { return '<div class="stat' + (warn ? ' warn' : '') + '"><div class="num">' + num + '</div><div class="lbl">' + lbl + '</div></div>'; }
+    $('summaryRow').innerHTML =
+      stat(sm.totals ? sm.totals.total_signs : 0, 'Total signs (' + (sm.totals ? sm.totals.line_items : 0) + ' line items)') +
+      stat(byCat.sponsor ? byCat.sponsor.total_signs : 0, 'Sponsor signs') +
+      stat(byCat.vendor ? byCat.vendor.total_signs : 0, 'Vendor signs') +
+      stat(byCat.operations ? byCat.operations.total_signs : 0, 'Operations signs') +
+      stat(attention, 'Need repair / replace', attention > 0);
+  }
+
+  function renderTable() {
+    if (!signs.length) { $('signsBody').innerHTML = '<tr><td colspan="11" class="loading">No signs yet — add one or load the standard checklist.</td></tr>'; return; }
+    $('signsBody').innerHTML = signs.map(function(s) {
+      var who = s.sponsor_name || s.vendor_name;
+      var road = s.sign_location_name ? esc(s.sign_location_name + (s.sign_location_cross_street ? ' @ ' + s.sign_location_cross_street : '')) : '<span class="muted">—</span>';
+      var condCls = s.condition ? ' class="cond-' + esc(s.condition.split(' ')[0]) + '"' : '';
+      return '<tr>' +
+        '<td><strong>' + esc(s.name) + '</strong>' + (s.notes ? '<div class="muted" style="font-size:11px">' + esc(s.notes) + '</div>' : '') + '</td>' +
+        '<td><span class="cat ' + esc(s.category) + '">' + esc(s.category) + '</span></td>' +
+        '<td>' + (who ? '<span class="linked">' + esc(who) + '</span>' : '<span class="muted">—</span>') + '</td>' +
+        '<td>' + road + '</td>' +
+        '<td>' + (s.size ? esc(s.size) : '<span class="muted">—</span>') + '</td>' +
+        '<td>' + (s.material ? esc(s.material) : '<span class="muted">—</span>') + '</td>' +
+        '<td>' + esc(s.quantity) + '</td>' +
+        '<td' + condCls + '>' + (s.condition ? esc(s.condition) : '<span class="muted">—</span>') + '</td>' +
+        '<td>' + (s.site_location ? esc(s.site_location) : '<span class="muted">—</span>') + '</td>' +
+        '<td>' + (s.storage_location ? esc(s.storage_location) : '<span class="muted">—</span>') + '</td>' +
+        '<td class="row-actions"><button class="btn btn-grey" onclick="openModal(' + s.id + ')">Edit</button>' +
+        '<button class="btn btn-red" onclick="removeSign(' + s.id + ')">✕</button></td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function setFilter(btn) {
+    filterCat = btn.getAttribute('data-cat');
+    document.querySelectorAll('.chip').forEach(function(c){ c.classList.remove('on'); });
+    btn.classList.add('on');
+    refresh();
+  }
+
+  function onCategoryChange() {
+    var cat = $('fCategory').value;
+    $('gSponsor').style.display = cat === 'sponsor' ? '' : 'none';
+    $('gVendor').style.display = cat === 'vendor' ? '' : 'none';
+  }
+
+  function openModal(id) {
+    editingId = id || null;
+    $('modalTitle').textContent = id ? 'Edit Sign' : 'Add Sign';
+    var s = id ? signs.find(function(x){ return x.id === id; }) : null;
+    $('fName').value = s ? s.name : '';
+    $('fCategory').value = s ? s.category : 'operations';
+    $('fSponsor').value = s && s.sponsor_id ? s.sponsor_id : '';
+    $('fVendor').value = s && s.vendor_id ? s.vendor_id : '';
+    $('fSignLocation').value = s && s.sign_location_id ? s.sign_location_id : '';
+    $('fSize').value = s && s.size ? s.size : '';
+    $('fMaterial').value = s && s.material ? s.material : '';
+    $('fQuantity').value = s ? s.quantity : 1;
+    $('fCondition').value = s && s.condition ? s.condition : '';
+    $('fSiteLocation').value = s && s.site_location ? s.site_location : '';
+    $('fStorage').value = s && s.storage_location ? s.storage_location : '';
+    $('fNotes').value = s && s.notes ? s.notes : '';
+    onCategoryChange();
+    $('modalBg').style.display = 'flex';
+  }
+  function closeModal() { $('modalBg').style.display = 'none'; }
+  $('modalBg').addEventListener('click', function(e){ if (e.target === this) closeModal(); });
+
+  async function saveSign() {
+    var body = {
+      name: $('fName').value,
+      category: $('fCategory').value,
+      sponsor_id: $('fSponsor').value || null,
+      vendor_id: $('fVendor').value || null,
+      sign_location_id: $('fSignLocation').value || null,
+      size: $('fSize').value,
+      material: $('fMaterial').value,
+      quantity: $('fQuantity').value,
+      condition: $('fCondition').value,
+      site_location: $('fSiteLocation').value,
+      storage_location: $('fStorage').value,
+      notes: $('fNotes').value
+    };
+    if (!body.name.trim()) { toast('Sign name is required'); return; }
+    $('saveBtn').disabled = true;
+    try {
+      var res = await fetch(API + '/signs' + (editingId ? '/' + editingId : ''), {
+        method: editingId ? 'PUT' : 'POST', headers: hdrs(), body: JSON.stringify(body)
+      });
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Save failed');
+      closeModal();
+      toast(editingId ? 'Sign updated' : 'Sign added');
+      await refresh();
+    } catch (e) { toast(e.message); }
+    $('saveBtn').disabled = false;
+  }
+
+  async function removeSign(id) {
+    var s = signs.find(function(x){ return x.id === id; });
+    if (!confirm('Delete "' + (s ? s.name : 'this sign') + '" from the inventory?')) return;
+    try {
+      var res = await fetch(API + '/signs/' + id, { method: 'DELETE', headers: hdrs() });
+      if (!res.ok) throw new Error('Delete failed');
+      toast('Sign deleted');
+      await refresh();
+    } catch (e) { toast(e.message); }
+  }
+
+  async function seedDefaults() {
+    if (!confirm('Load the standard operations signage checklist? Existing signs are never duplicated.')) return;
+    try {
+      var res = await fetch(API + '/signs/seed-defaults', { method: 'POST', headers: hdrs() });
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      toast('Added ' + data.inserted + ' signs (' + data.skipped + ' already existed)');
+      await refresh();
+    } catch (e) { toast(e.message); }
+  }
+</script>
+</body>
+</html>

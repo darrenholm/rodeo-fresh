@@ -3,12 +3,10 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
-// ── Normalize UID so all devices produce the same result ──
-function normalizeUid(uid) {
-  const cleaned = uid.replace(/[^a-fA-F0-9]/g, '').toUpperCase();
-  const bytes = cleaned.match(/.{2}/g);
-  return bytes ? bytes.sort().join('') : cleaned;
-}
+// ── Normalize/resolve UIDs so all devices produce the same result ──
+// (shared with badges.js and staff-wristband.js; resolveUid also matches +
+// heals legacy rows stored with the gate wedge readers' extra trailing byte)
+const { normalizeUid, resolveUid } = require('../lib/uid');
 
 // ============================================
 // WRISTBAND ROUTES
@@ -17,7 +15,7 @@ function normalizeUid(uid) {
 // GET wristband by RFID UID
 router.get('/rfid/:uid', authenticateToken, async (req, res) => {
   try {
-    const uid = normalizeUid(req.params.uid);
+    const uid = await resolveUid(pool, 'wristbands', req.params.uid);
     const result = await pool.query(
       `SELECT w.*, t.event_id, t.status as ticket_status
        FROM wristbands w
@@ -43,7 +41,10 @@ router.post('/link', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const uid = normalizeUid(rfid_uid);
+    // Registration: resolves to the canonical 7-byte UID (wedge readers'
+    // extra trailing byte stripped; heals a legacy row if one matches, so
+    // the duplicate-key handler below fires instead of double-registering)
+    const uid = await resolveUid(pool, 'wristbands', rfid_uid);
 
     const ticketResult = await pool.query(
       'SELECT customer_name, customer_email FROM ticket_orders WHERE id = $1',
@@ -83,7 +84,7 @@ router.post('/approve-age', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Missing rfid_uid' });
     }
 
-    const uid = normalizeUid(rfid_uid);
+    const uid = await resolveUid(pool, 'wristbands', rfid_uid);
     const result = await pool.query(
       `UPDATE wristbands 
        SET alcohol_approved = true, 
@@ -114,7 +115,7 @@ router.post('/revoke-age', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Missing rfid_uid' });
     }
 
-    const uid = normalizeUid(rfid_uid);
+    const uid = await resolveUid(pool, 'wristbands', rfid_uid);
     const result = await pool.query(
       `UPDATE wristbands 
        SET alcohol_approved = false,
@@ -145,7 +146,7 @@ router.post('/add-credits', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const uid = normalizeUid(rfid_uid);
+    const uid = await resolveUid(pool, 'wristbands', rfid_uid);
     const checkResult = await pool.query(
       'SELECT * FROM wristbands WHERE UPPER(rfid_uid) = $1',
       [uid]
@@ -202,7 +203,7 @@ router.post('/redeem', authenticateToken, async (req, res) => {
     const requireAlcoholApproved = category === 'drink';
     const alcoholClause = requireAlcoholApproved ? 'AND alcohol_approved = true' : '';
 
-    const uid = normalizeUid(rfid_uid);
+    const uid = await resolveUid(pool, 'wristbands', rfid_uid);
 
     const result = await pool.query(
       `UPDATE wristbands
@@ -274,7 +275,7 @@ router.post('/cancel-drink', authenticateToken, async (req, res) => {
     const { rfid_uid, amount = 7 } = req.body;
     if (!rfid_uid) return res.status(400).json({ error: 'Missing rfid_uid' });
 
-    const uid = normalizeUid(rfid_uid);
+    const uid = await resolveUid(pool, 'wristbands', rfid_uid);
     // Refund credits and free up one slot in the per-visit serving counter.
     const result = await pool.query(
       `UPDATE wristbands
@@ -303,7 +304,7 @@ router.post('/start-visit', authenticateToken, async (req, res) => {
     const { rfid_uid } = req.body;
     if (!rfid_uid) return res.status(400).json({ error: 'Missing rfid_uid' });
 
-    const uid = normalizeUid(rfid_uid);
+    const uid = await resolveUid(pool, 'wristbands', rfid_uid);
     const result = await pool.query(
       `UPDATE wristbands SET visit_drink_count = 0
        WHERE UPPER(rfid_uid) = $1 RETURNING rfid_uid, visit_drink_count`,
@@ -321,7 +322,7 @@ router.post('/start-visit', authenticateToken, async (req, res) => {
 // GET wristband balance (for kiosk balance checker)
 router.get('/balance/:uid', async (req, res) => {
   try {
-    const uid = normalizeUid(req.params.uid);
+    const uid = await resolveUid(pool, 'wristbands', req.params.uid);
     const result = await pool.query(
       'SELECT rfid_uid, customer_name, credits, credits_spent, alcohol_approved, badge_type, unlimited, area_access FROM wristbands WHERE UPPER(rfid_uid) = $1',
       [uid]

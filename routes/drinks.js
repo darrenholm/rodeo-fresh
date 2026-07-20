@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const { resolveUid } = require('../lib/uid');
 
 // ============================================
 // DRINK ROUTES
@@ -50,6 +51,9 @@ router.post('/serve', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    // Normalize + tolerate legacy wedge-reader UIDs (extra trailing byte)
+    const uid = await resolveUid(pool, 'wristbands', rfid_uid);
+
     // Get drink info
     const drinkResult = await pool.query(
       'SELECT * FROM drinks WHERE id = $1 AND active = true',
@@ -68,7 +72,7 @@ router.post('/serve', authenticateToken, async (req, res) => {
     // Get wristband (case insensitive)
     const bandResult = await pool.query(
       'SELECT * FROM wristbands WHERE UPPER(rfid_uid) = UPPER($1)',
-      [rfid_uid]
+      [uid]
     );
     if (bandResult.rows.length === 0) {
       return res.status(404).json({ error: 'Wristband not found' });
@@ -110,7 +114,7 @@ router.post('/serve', authenticateToken, async (req, res) => {
            credits_spent = credits_spent + $1,
            visit_drink_count = COALESCE(visit_drink_count, 0) + 1
        WHERE UPPER(rfid_uid) = UPPER($2)`,
-      [drink.price, rfid_uid]
+      [drink.price, uid]
     );
 
     // Deduct from inventory
@@ -142,7 +146,7 @@ router.post('/serve', authenticateToken, async (req, res) => {
     // Get updated wristband (case insensitive)
     const updatedBand = await pool.query(
       'SELECT * FROM wristbands WHERE UPPER(rfid_uid) = UPPER($1)',
-      [rfid_uid]
+      [uid]
     );
 
     console.log(`✓ Served: ${drink.name} to ${band.customer_name} - $${drink.price}`);

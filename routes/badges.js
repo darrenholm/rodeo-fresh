@@ -33,11 +33,9 @@ function levelFromAmount(amt){
 
 // Match the normalization used by every other RFID route so a tag read by
 // the check-in tablet resolves to the same UID at the bar/gate readers.
-function normalizeUid(uid) {
-  const cleaned = (uid || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase();
-  const bytes = cleaned.match(/.{2}/g);
-  return bytes ? bytes.sort().join('') : cleaned;
-}
+// resolveUid also matches + heals legacy rows stored with a USB wedge
+// reader's extra trailing byte.
+const { normalizeUid, resolveUid } = require('../lib/uid');
 
 function genId() {
   return `badge_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
@@ -259,7 +257,7 @@ router.post('/access-check', authenticateToken, async (req, res) => {
   try {
     const { rfid_uid, zone } = req.body;
     if (!rfid_uid || !zone) return res.status(400).json({ error: 'rfid_uid and zone required' });
-    const uid = normalizeUid(rfid_uid);
+    const uid = await resolveUid(pool, 'wristbands', rfid_uid);
 
     const zoneRow = await pool.query('SELECT key, label FROM access_zones WHERE key = $1', [zone]);
     const zoneLabel = zoneRow.rows[0]?.label || zone;
@@ -327,7 +325,7 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: `badge_type must be one of: ${BADGE_TYPES.join(', ')}` });
     }
 
-    const uid = normalizeUid(rfid_uid);
+    const uid = await resolveUid(pool, 'wristbands', rfid_uid);
     const dupe = await pool.query('SELECT id, customer_name FROM wristbands WHERE UPPER(rfid_uid) = $1', [uid]);
     if (dupe.rows.length > 0) {
       return res.status(409).json({ error: `This card is already assigned to ${dupe.rows[0].customer_name || 'someone'}` });
@@ -431,7 +429,7 @@ router.post('/:id/link', authenticateToken, async (req, res) => {
   try {
     const { rfid_uid } = req.body;
     if (!rfid_uid) return res.status(400).json({ error: 'rfid_uid required' });
-    const uid = normalizeUid(rfid_uid);
+    const uid = await resolveUid(pool, 'wristbands', rfid_uid);
 
     const dupe = await pool.query(
       'SELECT id, customer_name FROM wristbands WHERE UPPER(rfid_uid) = $1 AND id != $2', [uid, req.params.id]

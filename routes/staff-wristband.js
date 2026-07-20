@@ -8,18 +8,16 @@ const jwt = require('jsonwebtoken');
 // STAFF WRISTBAND ROUTES
 // ============================================
 
-function normalizeUid(uid) {
-    const cleaned = (uid || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase();
-    const bytes = cleaned.match(/.{2}/g);
-    return bytes ? bytes.sort().join('') : cleaned;
-}
+// Shared UID normalization; resolveUid also matches + heals rows stored
+// with a USB wedge reader's extra trailing byte.
+const { resolveUid } = require('../lib/uid');
 
 // ============================================
 // GET /api/staff-wristband/:uid
 // ============================================
 router.get('/:uid', async (req, res) => {
     try {
-        const uid = normalizeUid(req.params.uid);
+        const uid = await resolveUid(pool, 'staff', req.params.uid);
         const result = await pool.query(
             `SELECT id, fullname AS name, email, roles, drink_allowance, drinks_used, wristband_active
              FROM staff
@@ -50,7 +48,7 @@ router.post('/login', async (req, res) => {
         const { rfid_uid } = req.body;
         if (!rfid_uid) return res.status(400).json({ error: 'rfid_uid required' });
 
-        const uid = normalizeUid(rfid_uid);
+        const uid = await resolveUid(pool, 'staff', rfid_uid);
         const result = await pool.query(
             `SELECT id, fullname AS name, email, roles, drink_allowance, drinks_used, wristband_active
              FROM staff
@@ -97,7 +95,7 @@ router.post('/link', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'staff_id and rfid_uid required' });
         }
 
-        const uid = normalizeUid(rfid_uid);
+        const uid = await resolveUid(pool, 'staff', rfid_uid);
 
         const existing = await pool.query(
             'SELECT id, fullname AS name FROM staff WHERE UPPER(rfid_uid) = $1 AND id != $2',
@@ -161,7 +159,7 @@ router.post('/serve-drink', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'rfid_uid and drink_id required' });
         }
 
-        const uid = normalizeUid(rfid_uid);
+        const uid = await resolveUid(pool, 'staff', rfid_uid);
 
         const staffResult = await pool.query(
             `SELECT *, fullname AS name FROM staff WHERE UPPER(rfid_uid) = $1 AND wristband_active = true`,
@@ -240,7 +238,7 @@ router.post('/cancel-drink', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'rfid_uid and drink_id required' });
         }
 
-        const uid = normalizeUid(rfid_uid);
+        const uid = await resolveUid(pool, 'staff', rfid_uid);
 
         const staffResult = await pool.query(
             `SELECT id, fullname AS name FROM staff WHERE UPPER(rfid_uid) = $1 AND wristband_active = true`,
@@ -301,7 +299,7 @@ router.post('/log-access', async (req, res) => {
             return res.status(400).json({ error: 'rfid_uid and location required' });
         }
 
-        const uid = normalizeUid(rfid_uid);
+        const uid = await resolveUid(pool, 'staff', rfid_uid);
 
         const staffResult = await pool.query(
             `SELECT id, fullname AS name, roles FROM staff WHERE UPPER(rfid_uid) = $1 AND wristband_active = true`,

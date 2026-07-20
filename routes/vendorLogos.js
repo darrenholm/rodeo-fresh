@@ -7,7 +7,7 @@ const pool = require('../config/database');
 const router = express.Router();
 
 const MAX_BYTES = 25 * 1024 * 1024;
-const VECTOR_EXTS = ['svg', 'eps', 'ai', 'pdf'];
+const VECTOR_EXTS = ['svg', 'eps', 'ai', 'pdf', 'cdr'];
 const BITMAP_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'tif', 'tiff'];
 const VARIANTS = ['full-color', 'black', 'white', 'icon'];
 

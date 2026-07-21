@@ -34,6 +34,8 @@ module.exports = function(pool) {
       // Add indexes for fast lookups
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_kitchen_orders_status ON kitchen_orders(status)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_kitchen_orders_created ON kitchen_orders(created_at DESC)`);
+      // Booth routing: 'main' = kitchen, 'icecream' = ice cream booth display
+      await pool.query(`ALTER TABLE kitchen_orders ADD COLUMN IF NOT EXISTS booth VARCHAR(30) DEFAULT 'main'`);
       console.log('[kitchen-orders] Table ready');
     } catch (err) {
       console.error('[kitchen-orders] Table setup error:', err.message);
@@ -43,7 +45,7 @@ module.exports = function(pool) {
   // ─── GET /api/kitchen/orders — Active orders for displays ───
   router.get('/orders', async (req, res) => {
     try {
-      const { status, since } = req.query;
+      const { status, since, booth } = req.query;
 
       let query = `
         SELECT * FROM kitchen_orders
@@ -51,6 +53,11 @@ module.exports = function(pool) {
           AND created_at > NOW() - INTERVAL '8 hours'
       `;
       const params = [];
+
+      if (booth) {
+        params.push(booth);
+        query += ` AND COALESCE(booth, 'main') = $${params.length}`;
+      }
 
       if (status) {
         params.push(status);
@@ -82,7 +89,7 @@ module.exports = function(pool) {
   // ─── POST /api/kitchen/orders — Create new order ───
   router.post('/orders', async (req, res) => {
     try {
-      const { customerName, items, subtotal, tax, total, source, paymentRef } = req.body;
+      const { customerName, items, subtotal, tax, total, source, paymentRef, booth } = req.body;
 
       if (!items || items.length === 0) {
         return res.status(400).json({ error: 'No items in order' });
@@ -96,8 +103,8 @@ module.exports = function(pool) {
       const orderNumber = String((todayCount % 99) + 1).padStart(2, '0');
 
       const { rows } = await pool.query(
-        `INSERT INTO kitchen_orders (order_number, customer_name, items, subtotal, tax, total, source, payment_ref, payment_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `INSERT INTO kitchen_orders (order_number, customer_name, items, subtotal, tax, total, source, payment_ref, payment_status, booth)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING *`,
         [
           orderNumber,
@@ -108,7 +115,8 @@ module.exports = function(pool) {
           total || 0,
           source || 'kiosk',
           paymentRef || null,
-          paymentRef ? 'paid' : 'pending'
+          paymentRef ? 'paid' : 'pending',
+          booth || 'main'
         ]
       );
 

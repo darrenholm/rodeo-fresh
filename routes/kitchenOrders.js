@@ -54,8 +54,11 @@ module.exports = function(pool) {
       `;
       const params = [];
 
-      if (booth) {
-        params.push(booth);
+      // Default to the main kitchen so stale/cached kitchen screens can never
+      // show another booth's orders. Dashboards pass booth=all for everything.
+      const boothFilter = booth || 'main';
+      if (boothFilter !== 'all') {
+        params.push(boothFilter);
         query += ` AND COALESCE(booth, 'main') = $${params.length}`;
       }
 

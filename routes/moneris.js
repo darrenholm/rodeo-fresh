@@ -8,6 +8,43 @@ const MONERIS_PRELOAD_URL = 'https://gateway.moneris.com/chkt/request/request.ph
 
 const pendingCheckouts = new Map();
 
+// The in-memory map dies on every deploy/restart, which loses in-flight
+// checkouts (customer pays at Moneris, confirm-payment finds nothing).
+// Mirror ticket checkouts to a DB table so confirm-payment can recover them.
+pool.query(`CREATE TABLE IF NOT EXISTS pending_checkouts (
+  confirmation_code TEXT PRIMARY KEY,
+  data JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`).catch(err => console.error('pending_checkouts table init failed:', err.message));
+
+async function persistPendingCheckout(code, data) {
+  try {
+    await pool.query(
+      `INSERT INTO pending_checkouts (confirmation_code, data) VALUES ($1, $2)
+       ON CONFLICT (confirmation_code) DO UPDATE SET data = $2`,
+      [code, JSON.stringify(data)]
+    );
+  } catch (err) {
+    console.error(`Failed to persist pending checkout ${code}:`, err.message);
+  }
+}
+
+async function loadPendingCheckout(code) {
+  try {
+    const r = await pool.query('SELECT data FROM pending_checkouts WHERE confirmation_code = $1', [code]);
+    return r.rows.length ? r.rows[0].data : null;
+  } catch (err) {
+    console.error(`Failed to load pending checkout ${code}:`, err.message);
+    return null;
+  }
+}
+
+function deletePendingCheckout(code) {
+  pendingCheckouts.delete(code);
+  pool.query('DELETE FROM pending_checkouts WHERE confirmation_code = $1', [code])
+    .catch(err => console.error(`Failed to delete pending checkout ${code}:`, err.message));
+}
+
 setInterval(() => {
   const oneHourAgo = Date.now() - (60 * 60 * 1000);
   for (const [code, data] of pendingCheckouts.entries()) {
@@ -16,6 +53,10 @@ setInterval(() => {
       console.log(`Cleaned up abandoned checkout: ${code}`);
     }
   }
+  // DB rows stick around longer so late confirms survive restarts;
+  // anything older than 7 days is genuinely dead.
+  pool.query(`DELETE FROM pending_checkouts WHERE created_at < NOW() - INTERVAL '7 days'`)
+    .catch(err => console.error('pending_checkouts cleanup failed:', err.message));
 }, 15 * 60 * 1000);
 
 function getMonerisCredentials() {
@@ -127,6 +168,7 @@ router.post('/ticket-checkout', async (req, res) => {
     const checkoutEntry = pendingCheckouts.get(confirmationCode);
     checkoutEntry.monerisTicket = monerisTicket;
     pendingCheckouts.set(confirmationCode, checkoutEntry);
+    await persistPendingCheckout(confirmationCode, checkoutEntry);
 
     console.log(`✓ Moneris checkout created: ${confirmationCode}, total: $${total.toFixed(2)}, monerisTicket: ${monerisTicket}`);
     res.json({ ticket: monerisTicket, confirmation_code: confirmationCode });
@@ -155,7 +197,14 @@ router.post('/confirm-payment', async (req, res) => {
       return res.json({ success: true, message: 'Order already confirmed', confirmation_code });
     }
 
-    const checkoutData = pendingCheckouts.get(confirmation_code);
+    let checkoutData = pendingCheckouts.get(confirmation_code);
+    if (!checkoutData) {
+      // Server restarted (or >1h passed) since preload — recover from the DB mirror
+      checkoutData = await loadPendingCheckout(confirmation_code);
+      if (checkoutData) {
+        console.log(`Recovered pending checkout from DB: ${confirmation_code}`);
+      }
+    }
     if (!checkoutData) {
       console.error(`No pending checkout found for: ${confirmation_code}`);
       return res.status(404).json({ error: 'Checkout session not found or expired' });
@@ -188,7 +237,7 @@ router.post('/confirm-payment', async (req, res) => {
 
     if (!paymentSuccess) {
       console.log(`[Moneris] Payment NOT approved for ${confirmation_code}, result: ${verifyResult?.response?.result}`);
-      pendingCheckouts.delete(confirmation_code);
+      deletePendingCheckout(confirmation_code);
       return res.status(402).json({ error: 'Payment was not approved by Moneris' });
     }
 
@@ -296,7 +345,7 @@ router.post('/confirm-payment', async (req, res) => {
       console.error('Email failed (order still confirmed):', emailErr.message);
     }
 
-    pendingCheckouts.delete(confirmation_code);
+    deletePendingCheckout(confirmation_code);
     console.log(`✓ Payment confirmed: ${confirmation_code}`);
     res.json({ success: true, confirmation_code, message: 'Payment confirmed and ticket created' });
   } catch (error) {

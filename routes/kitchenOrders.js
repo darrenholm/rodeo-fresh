@@ -132,30 +132,52 @@ module.exports = function(pool) {
   router.patch('/orders/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const { status } = req.body;
+      const { status, items, subtotal, tax, total } = req.body;
 
-      const validStatuses = ['new', 'in_progress', 'ready', 'picked_up'];
-      if (!validStatuses.includes(status)) {
-        return res.status(400).json({ error: 'Invalid status. Use: ' + validStatuses.join(', ') });
+      const sets = [];
+      const params = [];
+
+      if (status !== undefined) {
+        const validStatuses = ['new', 'in_progress', 'ready', 'picked_up'];
+        if (!validStatuses.includes(status)) {
+          return res.status(400).json({ error: 'Invalid status. Use: ' + validStatuses.join(', ') });
+        }
+        params.push(status);
+        sets.push(`status = $${params.length}`);
+        if (status === 'ready') sets.push('completed_at = NOW()');
+        if (status === 'picked_up') sets.push('picked_up_at = NOW()');
       }
 
-      let extraFields = '';
-      if (status === 'ready') extraFields = ', completed_at = NOW()';
-      if (status === 'picked_up') extraFields = ', picked_up_at = NOW()';
+      // Item-level edits from the booth displays
+      if (items !== undefined) {
+        if (!Array.isArray(items) || items.length === 0) {
+          return res.status(400).json({ error: 'items must be a non-empty array (delete the order instead)' });
+        }
+        params.push(JSON.stringify(items));
+        sets.push(`items = $${params.length}`);
+        if (subtotal !== undefined) { params.push(subtotal); sets.push(`subtotal = $${params.length}`); }
+        if (tax !== undefined)      { params.push(tax);      sets.push(`tax = $${params.length}`); }
+        if (total !== undefined)    { params.push(total);    sets.push(`total = $${params.length}`); }
+      }
 
+      if (sets.length === 0) {
+        return res.status(400).json({ error: 'Nothing to update' });
+      }
+
+      params.push(id);
       const { rows } = await pool.query(
         `UPDATE kitchen_orders
-         SET status = $1, updated_at = NOW() ${extraFields}
-         WHERE id = $2
+         SET ${sets.join(', ')}, updated_at = NOW()
+         WHERE id = $${params.length}
          RETURNING *`,
-        [status, id]
+        params
       );
 
       if (rows.length === 0) {
         return res.status(404).json({ error: 'Order not found' });
       }
 
-      console.log(`[kitchen-orders] Order #${rows[0].order_number} → ${status}`);
+      console.log(`[kitchen-orders] Order #${rows[0].order_number} updated${status ? ' → ' + status : ''}${items ? ' (items edited)' : ''}`);
       res.json({ success: true, order: rows[0] });
     } catch (err) {
       console.error('[kitchen-orders] PATCH error:', err.message);

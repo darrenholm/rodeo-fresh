@@ -48,6 +48,22 @@ function qrImageUrl(code) {
   return `${process.env.PUBLIC_API_URL || 'https://api.holmdalerodeo.ca'}/api/ticket-orders/${encodeURIComponent(code)}/qr.png`;
 }
 
+// QR as a real attachment — some clients (Yahoo web, iPhone Mail with
+// privacy protection) block remote images entirely, so the inline <img>
+// alone isn't reliable. Attaching the PNG guarantees the customer has it.
+async function buildQrAttachment(code) {
+  try {
+    const png = await QRCode.toBuffer(code, {
+      width: 512, margin: 2,
+      color: { dark: '#000000', light: '#ffffff' }
+    });
+    return { filename: `HolmdaleRodeo-Ticket-${code}.png`, content: png.toString('base64') };
+  } catch (err) {
+    console.error('QR attachment build failed:', err.message);
+    return null;
+  }
+}
+
 async function buildTicketEmailHtml(ticket, event) {
   const qrDataUrl = qrImageUrl(ticket.confirmation_code);
 
@@ -89,6 +105,7 @@ async function buildTicketEmailHtml(ticket, event) {
       ${ticket.confirmation_code}
     </div>
     <p style="color:#78716c; font-size:12px; margin:4px 0 0;">Show this QR code at the gate</p>
+    <p style="color:#78716c; font-size:12px; margin:4px 0 0;">Can't see the code above? It's also attached to this email — or just show your confirmation number.</p>
   </div>
   <!-- Event Details -->
   <div style="padding:0 24px 20px;">
@@ -176,10 +193,12 @@ router.post('/ticket-confirmation', async (req, res) => {
 
     // ✅ FIX: await the now-async buildTicketEmailHtml
     const html = await buildTicketEmailHtml(ticket, event);
+    const qrAttachment = await buildQrAttachment(ticket.confirmation_code);
     await sendEmail({
       to: ticket.customer_email,
       subject: `🎟 Your Holmdale Pro Rodeo Tickets — ${ticket.confirmation_code}`,
-      html
+      html,
+      attachments: qrAttachment ? [qrAttachment] : undefined
     });
 
     await pool.query(
@@ -191,8 +210,7 @@ router.post('/ticket-confirmation', async (req, res) => {
     res.json({
       success: true,
       message: 'Confirmation email sent',
-      confirmation_code: ticket.confirmation_code,
-      email: ticket.customer_email
+      confirmation_code: ticket.confirmation_code
     });
   } catch (error) {
     console.error('✗ Email error:', error);
@@ -213,7 +231,7 @@ router.post('/send-confirmation', async (req, res) => {
 // POST /api/email/resend-ticket
 // Resend a confirmation email for an existing order
 // ============================================
-router.post('/resend-ticket', async (req, res) => {
+router.post('/resend-ticket', authenticateToken, async (req, res) => {
   try {
     const { confirmation_code, email } = req.body;
     if (!confirmation_code) {
@@ -242,10 +260,12 @@ router.post('/resend-ticket', async (req, res) => {
 
     // ✅ FIX: await the now-async buildTicketEmailHtml
     const html = await buildTicketEmailHtml(ticket, event);
+    const qrAttachment = await buildQrAttachment(ticket.confirmation_code);
     await sendEmail({
       to: sendTo,
       subject: `🎟 Your Holmdale Pro Rodeo Tickets — ${ticket.confirmation_code}`,
-      html
+      html,
+      attachments: qrAttachment ? [qrAttachment] : undefined
     });
 
     console.log(`✓ Resent confirmation for ${ticket.confirmation_code} to ${sendTo}`);
@@ -260,7 +280,7 @@ router.post('/resend-ticket', async (req, res) => {
 // POST /api/email/test
 // Send a test email to verify Resend is working
 // ============================================
-router.post('/test', async (req, res) => {
+router.post('/test', authenticateToken, async (req, res) => {
   try {
     const { to } = req.body;
     const testTo = to || 'darren@holmgraphics.ca';
@@ -505,3 +525,5 @@ module.exports = router;
 // Expose the Resend helper so other routes (e.g. sponsor-portal magic links)
 // can send mail without duplicating the Resend fetch.
 module.exports.sendEmail = sendEmail;
+module.exports.buildQrAttachment = buildQrAttachment;
+module.exports.buildTicketEmailHtml = buildTicketEmailHtml;

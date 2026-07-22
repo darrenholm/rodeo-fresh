@@ -299,6 +299,7 @@ router.post('/confirm-payment', async (req, res) => {
     <img src="${qrDataUrl}" alt="QR Code" style="width:180px;height:180px;border:4px solid #1c1917;border-radius:12px;">
     <div style="margin-top:12px;font-size:24px;font-weight:bold;color:#1c1917;letter-spacing:3px;">${confirmation_code}</div>
     <p style="color:#78716c;font-size:12px;margin:4px 0 0;">Show this QR code at the gate</p>
+    <p style="color:#78716c;font-size:12px;margin:4px 0 0;">Can't see the code above? It's also attached to this email — or just show your confirmation number.</p>
   </div>
   <div style="padding:0 24px 20px;">
     <div style="background:#f5f5f4;border-radius:10px;padding:16px;">
@@ -326,12 +327,18 @@ router.post('/confirm-payment', async (req, res) => {
 </div>
 </body></html>`;
 
+        // Attach the QR PNG too — some clients (Yahoo web, iPhone Mail privacy
+        // protection) block the remote <img>, so the attachment is the fallback.
+        const { buildQrAttachment } = require('./email');
+        const qrAttachment = await buildQrAttachment(confirmation_code);
+
         await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             from, to: [checkoutData.customerEmail],
-            subject: `🎟 Your Holmdale Pro Rodeo Tickets — ${confirmation_code}`, html
+            subject: `🎟 Your Holmdale Pro Rodeo Tickets — ${confirmation_code}`, html,
+            ...(qrAttachment ? { attachments: [qrAttachment] } : {})
           })
         });
 
@@ -378,7 +385,15 @@ router.post('/webhook', async (req, res) => {
         );
       } else {
         const checkoutData = pendingCheckouts.get(orderNo);
-        if (checkoutData) {
+        if (checkoutData && checkoutData.type === 'merch') {
+          const created = await finalizeMerchOrder(orderNo, checkoutData, null, 'webhook');
+          if (created) {
+            try { await sendMerchConfirmationEmail(orderNo, checkoutData); }
+            catch (e) { console.error('Webhook merch email failed:', e.message); }
+          }
+          pendingCheckouts.delete(orderNo);
+          console.log(`✓ Webhook: created merch order ${orderNo}`);
+        } else if (checkoutData) {
           const id = `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
           await pool.query(
             `INSERT INTO ticket_orders (
@@ -708,6 +723,277 @@ await fetch('https://api.resend.com/emails', {
     res.json({ success: true, confirmation_code });
   } catch (error) {
     console.error('[Vendor Confirm] Error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// POST /api/moneris/merch-checkout
+// ============================================
+router.post('/merch-checkout', async (req, res) => {
+  try {
+    const { items, customer_info, shipping_address, shipping_cost, shipping_method } = req.body;
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'No items in cart' });
+    }
+    if (!customer_info?.name || !customer_info?.email) {
+      return res.status(400).json({ error: 'Customer name and email required' });
+    }
+    if (shipping_method === 'ship' && !shipping_address?.postal_code) {
+      return res.status(400).json({ error: 'Shipping address required' });
+    }
+
+    // Price everything server-side from the products table
+    const lineItems = [];
+    for (const item of items) {
+      if (!item.product_id) return res.status(400).json({ error: 'Missing product_id' });
+      const qty = parseInt(item.quantity) || 1;
+      const result = await pool.query('SELECT * FROM products WHERE id = $1', [item.product_id]);
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: `Product not found: ${item.product_id}` });
+      }
+      const product = result.rows[0];
+      if ((product.stock || 0) < qty) {
+        return res.status(409).json({ error: `${product.name} is out of stock` });
+      }
+      // Same variant key convention as the POS (routes/merchSales.js)
+      const vkey = item.color && item.size ? `${item.color}|${item.size}` : (item.color || item.size || null);
+      if (vkey && product.variant_stock && Object.prototype.hasOwnProperty.call(product.variant_stock, vkey)
+          && (parseInt(product.variant_stock[vkey]) || 0) < qty) {
+        return res.status(409).json({ error: `${product.name} (${vkey.replace('|', ' / ')}) is out of stock` });
+      }
+      lineItems.push({
+        product_id: product.id,
+        name: product.name,
+        price: parseFloat(product.price),
+        quantity: qty,
+        size: item.size || null,
+        color: item.color || null
+      });
+    }
+
+    const subtotal = lineItems.reduce((sum, li) => sum + li.price * li.quantity, 0);
+    const shipping = shipping_method === 'pickup' ? 0 : (parseFloat(shipping_cost) || 0);
+    const hst = (subtotal + shipping) * 0.13;
+    const total = subtotal + shipping + hst;
+
+    const orderNo = `MO-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+
+    pendingCheckouts.set(orderNo, {
+      createdAt: Date.now(),
+      type: 'merch',
+      items: lineItems,
+      customerName: customer_info.name,
+      customerEmail: customer_info.email,
+      customerPhone: customer_info.phone || '',
+      shippingAddress: shipping_address || null,
+      shippingMethod: shipping_method || 'ship',
+      shippingCost: shipping,
+      subtotal,
+      hst,
+      total: total.toFixed(2),
+      monerisTicket: null
+    });
+
+    const { storeId, apiToken, checkoutId } = getMonerisCredentials();
+    const monerisTicket = await monerisPreload({
+      store_id: storeId,
+      api_token: apiToken,
+      checkout_id: checkoutId,
+      txn_total: total.toFixed(2),
+      cart_subtotal: (subtotal + shipping).toFixed(2),
+      tax: { amount: hst.toFixed(2), description: 'HST', rate: '13.00' },
+      environment: 'prod',
+      action: 'preload',
+      order_no: orderNo,
+      cust_id: customer_info.email,
+      contact_details: {
+        email: customer_info.email,
+        first_name: customer_info.name.split(' ')[0] || customer_info.name,
+        last_name: customer_info.name.split(' ').slice(1).join(' ') || ''
+      }
+    });
+
+    const entry = pendingCheckouts.get(orderNo);
+    entry.monerisTicket = monerisTicket;
+    pendingCheckouts.set(orderNo, entry);
+
+    console.log(`✓ Merch checkout created: ${orderNo}, total: $${total.toFixed(2)}`);
+    res.json({ ticket: monerisTicket, confirmation_code: orderNo });
+  } catch (error) {
+    console.error('Merch checkout error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Shared by /merch-confirm and the webhook — idempotent on orders.id.
+// Records the order and decrements pooled + per-variant stock
+// (same convention as routes/merchSales.js).
+async function finalizeMerchOrder(orderNo, checkoutData, monerisTxnId, createdBy) {
+  const existing = await pool.query('SELECT id FROM orders WHERE id = $1', [orderNo]);
+  if (existing.rows.length > 0) return false;
+
+  await pool.query(
+    `INSERT INTO orders (id, monaris_transaction_id, customer_name, customer_email, items,
+       total_amount, shipping_address, status, created_date, updated_date, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'paid', NOW(), NOW(), $8)`,
+    [orderNo, monerisTxnId || null, checkoutData.customerName, checkoutData.customerEmail,
+     JSON.stringify(checkoutData.items),
+     checkoutData.total,
+     JSON.stringify({
+       ...(checkoutData.shippingAddress || {}),
+       shipping_method: checkoutData.shippingMethod,
+       shipping_cost: checkoutData.shippingCost,
+       subtotal: checkoutData.subtotal,
+       hst: checkoutData.hst
+     }),
+     createdBy]
+  );
+
+  for (const li of checkoutData.items) {
+    await pool.query(
+      `UPDATE products SET stock = GREATEST(0, stock - $1), updated_date = NOW() WHERE id = $2`,
+      [li.quantity, li.product_id]
+    );
+    const vkey = li.color && li.size ? `${li.color}|${li.size}` : (li.color || li.size || null);
+    if (vkey) {
+      await pool.query(
+        `UPDATE products
+         SET variant_stock = jsonb_set(variant_stock, ARRAY[$1],
+               to_jsonb(GREATEST(0, COALESCE((variant_stock->>$1)::int, 0) - $2)))
+         WHERE id = $3 AND variant_stock IS NOT NULL AND variant_stock ? $1`,
+        [vkey, li.quantity, li.product_id]
+      );
+    }
+  }
+  return true;
+}
+
+async function sendMerchConfirmationEmail(orderNo, checkoutData) {
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+  if (!apiKey || !checkoutData.customerEmail) return;
+
+  const itemRows = checkoutData.items.map(li => {
+    const variant = [li.color, li.size].filter(Boolean).join(' / ');
+    return `<tr>
+      <td style="padding:6px 0;color:#44403c;">${li.quantity}x ${li.name}${variant ? ` <span style="color:#78716c;">(${variant})</span>` : ''}</td>
+      <td style="padding:6px 0;text-align:right;color:#44403c;">$${(li.price * li.quantity).toFixed(2)}</td>
+    </tr>`;
+  }).join('');
+
+  const isPickup = checkoutData.shippingMethod === 'pickup';
+  const addr = checkoutData.shippingAddress;
+  const deliveryHtml = isPickup
+    ? `<p style="color:#44403c;font-size:14px;">🏪 <strong>Pickup order</strong> — we'll email you when your order is ready for pickup.</p>`
+    : `<p style="color:#44403c;font-size:14px;">📦 <strong>Shipping to:</strong><br>${addr?.street || ''}<br>${addr?.city || ''}, ${addr?.province || ''} ${addr?.postal_code || ''}</p>`;
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f5f5f4;font-family:Arial,sans-serif;">
+<div style="max-width:500px;margin:20px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+  <div style="background:#1c1917;padding:24px;text-align:center;">
+    <h1 style="margin:0;color:#facc15;font-size:24px;letter-spacing:2px;">🤠 HOLMDALE PRO RODEO</h1>
+    <p style="margin:8px 0 0;color:#a8a29e;font-size:14px;">Merch Order Confirmation</p>
+  </div>
+  <div style="padding:24px;">
+    <h2 style="color:#1c1917;margin:0 0 4px;">Thanks, ${checkoutData.customerName}!</h2>
+    <p style="color:#78716c;font-size:13px;margin:0 0 16px;">Order reference: <strong>${orderNo}</strong></p>
+    <div style="background:#f5f5f4;border-radius:10px;padding:16px;margin-bottom:16px;">
+      <table style="width:100%;font-size:14px;border-collapse:collapse;">
+        ${itemRows}
+        <tr><td colspan="2" style="border-top:1px solid #e7e5e4;padding-top:8px;"></td></tr>
+        <tr><td style="padding:2px 0;color:#78716c;">Subtotal</td><td style="text-align:right;color:#78716c;">$${checkoutData.subtotal.toFixed(2)}</td></tr>
+        <tr><td style="padding:2px 0;color:#78716c;">Shipping</td><td style="text-align:right;color:#78716c;">$${checkoutData.shippingCost.toFixed(2)}</td></tr>
+        <tr><td style="padding:2px 0;color:#78716c;">HST (13%)</td><td style="text-align:right;color:#78716c;">$${checkoutData.hst.toFixed(2)}</td></tr>
+        <tr><td style="padding:6px 0;font-weight:bold;color:#1c1917;">Total</td><td style="text-align:right;font-weight:bold;font-size:18px;color:#16a34a;">$${parseFloat(checkoutData.total).toFixed(2)}</td></tr>
+      </table>
+    </div>
+    ${deliveryHtml}
+  </div>
+  <div style="background:#1c1917;padding:16px 24px;text-align:center;">
+    <p style="margin:0;color:#a8a29e;font-size:12px;">Questions? Email <a href="mailto:info@holmdalerodeo.ca" style="color:#facc15;">info@holmdalerodeo.ca</a></p>
+  </div>
+</div>
+</body></html>`;
+
+  await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from,
+      to: [checkoutData.customerEmail],
+      subject: `🛍 Your Holmdale Pro Rodeo Merch Order — ${orderNo}`,
+      html
+    })
+  });
+  console.log(`✓ Merch confirmation email sent for ${orderNo}`);
+}
+
+// ============================================
+// POST /api/moneris/merch-confirm
+// ============================================
+router.post('/merch-confirm', async (req, res) => {
+  try {
+    const { confirmation_code } = req.body;
+    if (!confirmation_code) {
+      return res.status(400).json({ error: 'Confirmation code required' });
+    }
+
+    const existingOrder = await pool.query('SELECT id FROM orders WHERE id = $1', [confirmation_code]);
+    if (existingOrder.rows.length > 0) {
+      console.log(`Merch order ${confirmation_code} already exists, skipping duplicate`);
+      return res.json({ success: true, message: 'Order already confirmed', confirmation_code });
+    }
+
+    const checkoutData = pendingCheckouts.get(confirmation_code);
+    if (!checkoutData || checkoutData.type !== 'merch') {
+      console.error(`[Merch Confirm] No pending merch checkout for: ${confirmation_code}`);
+      return res.status(404).json({ error: 'Checkout session not found or expired' });
+    }
+    if (!checkoutData.monerisTicket) {
+      return res.status(400).json({ error: 'Missing Moneris ticket token' });
+    }
+
+    const { storeId, apiToken, checkoutId } = getMonerisCredentials();
+    const verifyResponse = await fetch(MONERIS_PRELOAD_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        store_id: storeId,
+        api_token: apiToken,
+        checkout_id: checkoutId,
+        action: 'receipt',
+        ticket: checkoutData.monerisTicket,
+        environment: 'prod'
+      })
+    });
+    const verifyResult = await verifyResponse.json();
+    console.log(`[Merch Confirm] ${confirmation_code}: result=${verifyResult?.response?.receipt?.result}`);
+
+    const paymentSuccess = verifyResult?.response?.success === 'true' &&
+                           verifyResult?.response?.receipt?.result === 'a';
+    if (!paymentSuccess) {
+      console.log(`[Merch Confirm] Payment NOT approved for ${confirmation_code}`);
+      pendingCheckouts.delete(confirmation_code);
+      return res.status(402).json({ error: 'Payment was not approved by Moneris' });
+    }
+
+    const txnId = verifyResult?.response?.receipt?.cc?.transaction_no || null;
+    await finalizeMerchOrder(confirmation_code, checkoutData, txnId, 'web');
+
+    try {
+      await sendMerchConfirmationEmail(confirmation_code, checkoutData);
+    } catch (emailErr) {
+      console.error('Merch email failed (order still confirmed):', emailErr.message);
+    }
+
+    pendingCheckouts.delete(confirmation_code);
+    console.log(`✓ Merch payment confirmed: ${confirmation_code}`);
+    res.json({ success: true, confirmation_code, message: 'Payment confirmed and order created' });
+  } catch (error) {
+    console.error('Merch confirm error:', error);
     res.status(500).json({ error: error.message });
   }
 });

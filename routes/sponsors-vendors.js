@@ -21,8 +21,19 @@ const DISPLAYABLE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'];
 router.get('/sponsors/public', async (req, res) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    // level = per-year override, else derived from the year's amount
+    // (thresholds mirror sponsor_levels / manage-sponsors.html levelFor()).
     const result = await pool.query(
       `SELECT s.id, s.name, NULLIF(s.website, '') AS website,
+         COALESCE(ss.level_override,
+           CASE WHEN ss.amount >= 10000 THEN 'Title'
+                WHEN ss.amount >= 6500  THEN 'Platinum'
+                WHEN ss.amount >= 5000  THEN 'Gold'
+                WHEN ss.amount >= 2500  THEN 'Silver'
+                WHEN ss.amount >= 1000  THEN 'Bronze'
+                WHEN ss.amount >= 500   THEN 'Friend'
+                ELSE NULL END
+         ) AS level,
          COALESCE(
            (SELECT sl.blob_url FROM sponsor_logos sl
               WHERE sl.sponsor_id = s.id
@@ -36,11 +47,8 @@ router.get('/sponsors/public', async (req, res) => {
            NULLIF(s.logo_url, '')
          ) AS logo_url
        FROM sponsors s
+       JOIN sponsor_schedule ss ON ss.sponsor_id = s.id AND ss.year = $1
        WHERE s.active IS NOT FALSE
-         AND EXISTS (
-           SELECT 1 FROM sponsor_schedule ss
-           WHERE ss.sponsor_id = s.id AND ss.year = $1
-         )
        ORDER BY s.name`,
       [year, DISPLAYABLE_EXTS]
     );

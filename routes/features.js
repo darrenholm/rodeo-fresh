@@ -6,7 +6,7 @@ const { authenticateToken } = require('../middleware/auth');
 (async () => {
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS feature_flags (key VARCHAR(100) PRIMARY KEY, enabled BOOLEAN DEFAULT false, label VARCHAR(200), description VARCHAR(500), updated_at TIMESTAMPTZ DEFAULT NOW(), updated_by VARCHAR(200))`);
-    await pool.query(`INSERT INTO feature_flags (key, enabled, label, description) VALUES ('online_admission', false, 'Online Admission Tickets', 'Allow customers to buy admission tickets on holmdalerodeo.ca'), ('online_merchandise', false, 'Online Merchandise', 'Allow customers to buy merchandise on holmdalerodeo.ca'), ('buy_friend_drink', false, 'Buy a Friend a Drink', 'Allow on-site NFC wristband credit transfers between guests') ON CONFLICT (key) DO NOTHING`);
+    await pool.query(`INSERT INTO feature_flags (key, enabled, label, description) VALUES ('online_admission', false, 'Online Admission Tickets', 'Allow customers to buy admission tickets on holmdalerodeo.ca'), ('online_merchandise', false, 'Online Merchandise', 'Allow customers to buy merchandise on holmdalerodeo.ca'), ('buy_friend_drink', false, 'Buy a Friend a Drink', 'Allow on-site NFC wristband credit transfers between guests'), ('reload_cap_suspended', false, 'Suspend $80 Credit-Purchase Cap', 'AGCO: wristband credit purchases are capped at $80 each. Turn ON after AGCO inspection to lift the cap. Applies to bar-credit loads only, not food/merch sales.') ON CONFLICT (key) DO NOTHING`);
     console.log('Feature flags ready');
   } catch (e) { console.log('Feature flags note:', e.message); }
 })();

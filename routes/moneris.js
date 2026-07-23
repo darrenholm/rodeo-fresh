@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const { getCreditCap } = require('../lib/creditCap');
 const QRCode = require('qrcode');
 
 const MONERIS_PRELOAD_URL = 'https://gateway.moneris.com/chkt/request/request.php';
@@ -124,6 +125,17 @@ router.post('/ticket-checkout', async (req, res) => {
     const childSubtotal = (tickets.child || 0) * childPrice;
     const familySubtotal = (tickets.family || 0) * familyPrice;
     const barTicketsSubtotal = (barTickets || 0) * 7;
+
+    // AGCO cap on credit loads (per purchase, dollars) — suspendable via feature flag
+    if (barTicketsSubtotal > 0) {
+      const cap = await getCreditCap(pool);
+      if (cap != null && barTicketsSubtotal > cap) {
+        return res.status(400).json({
+          error: `Bar credit purchases are limited to $${cap} per order (AGCO). Reduce the drink tickets and try again.`,
+          limit: cap
+        });
+      }
+    }
     const subtotal = generalSubtotal + childSubtotal + familySubtotal + barTicketsSubtotal;
     const hst = subtotal * 0.13;
     const total = subtotal + hst;

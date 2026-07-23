@@ -5,6 +5,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET;
 const { authenticateToken } = require('../middleware/auth');
+const { getCreditCap } = require('../lib/creditCap');
 
 // ── Auth helper ──
 function requireRole(roles) {
@@ -47,6 +48,18 @@ router.post('/create-payment-intent', authenticateToken, async (req, res) => {
   try {
     const { amount, rfid_uid, tickets, credit_amount, metadata: clientMetadata } = req.body;
     if (!amount) return res.status(400).json({ error: 'amount required' });
+
+    // AGCO cap on credit loads (dollars, per purchase) — suspendable via feature flag
+    const creditCents = parseInt(credit_amount || 0);
+    if (creditCents > 0) {
+      const cap = await getCreditCap(pool);
+      if (cap != null && creditCents > cap * 100) {
+        return res.status(400).json({
+          error: `Credit purchases are limited to $${cap} each (AGCO). Choose a smaller amount.`,
+          limit: cap
+        });
+      }
+    }
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: parseInt(amount),

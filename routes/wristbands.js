@@ -270,10 +270,22 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // POST cancel/refund a drink (Bar)
+// Send drink_id so the refund amount comes from the drinks table (and the
+// serving goes back into stock). The client-supplied `amount` is only a
+// fallback for old app builds — it under-refunded $9/$10 drinks at a flat $7.
 router.post('/cancel-drink', authenticateToken, async (req, res) => {
   try {
-    const { rfid_uid, amount = 7 } = req.body;
+    const { rfid_uid, drink_id, amount = 7 } = req.body;
     if (!rfid_uid) return res.status(400).json({ error: 'Missing rfid_uid' });
+
+    let refund = amount;
+    let drink = null;
+    if (drink_id) {
+      const drinkResult = await pool.query('SELECT * FROM drinks WHERE id = $1', [drink_id]);
+      if (drinkResult.rows.length === 0) return res.status(404).json({ error: 'Drink not found' });
+      drink = drinkResult.rows[0];
+      refund = drink.price;
+    }
 
     const uid = await resolveUid(pool, 'wristbands', rfid_uid);
     // Refund credits and free up one slot in the per-visit serving counter.
@@ -283,12 +295,27 @@ router.post('/cancel-drink', authenticateToken, async (req, res) => {
            credits_spent = GREATEST(0, credits_spent - $1),
            visit_drink_count = GREATEST(0, COALESCE(visit_drink_count, 0) - 1)
        WHERE UPPER(rfid_uid) = $2 RETURNING *`,
-      [amount, uid]
+      [refund, uid]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Wristband not found' });
 
-    console.log(`✓ Drink cancelled: ${uid} +$${amount}`);
-    res.json({ success: true, wristband: result.rows[0] });
+    if (drink) {
+      await pool.query(
+        `UPDATE drinks SET stock_remaining = stock_remaining + 1,
+         total_sold = GREATEST(0, total_sold - 1) WHERE id = $1`,
+        [drink_id]
+      );
+    }
+
+    const transactionId = `transaction_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    await pool.query(
+      `INSERT INTO bar_transactions (id, wristband_id, amount, transaction_type, description, drink_name, created_by)
+       VALUES ($1, $2, $3, 'refund', $4, $5, $6)`,
+      [transactionId, result.rows[0].id, -refund, `${drink ? drink.name : 'Drink'} cancelled`, drink ? drink.name : null, req.user.email]
+    );
+
+    console.log(`✓ Drink cancelled: ${uid} +$${refund}${drink ? ` (${drink.name})` : ' (legacy amount)'}`);
+    res.json({ success: true, refund, wristband: result.rows[0] });
 
   } catch (error) {
     console.error('Error cancelling drink:', error);

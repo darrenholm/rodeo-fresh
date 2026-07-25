@@ -138,5 +138,6 @@ checks `/health`. Portal pages need no restart (Caddy serves the repo folder).
 | `sync-ticket-orders.js` | every 2 min: online sales cloud -> local |
 | `backup-dump.ps1` | every 15 min: local dump + mirror |
 | `sync-to-standby.ps1` | every 2 min on the PRIMARY: local db -> standby PC |
+| `setup-standby.ps1` | one-shot standby config after copying C:\rodeo over |
 | `update-code.ps1` | pull office fixes from GitHub, migrate, restart API |
 | `merge-back.js` | after event: local -> cloud (dry-run by default) |

@@ -4,6 +4,15 @@ const pool = require('../config/database');
 
 const router = express.Router();
 
+// Portal access levels. Stored on staff.roles (JSONB). The staff-edit
+// dropdown sends one of these; anything else is ignored and falls back to
+// 'staff'. Menu gating in index.html reads these off the login token.
+const VALID_ROLES = ['staff', 'manager', 'admin'];
+function normalizeRoles(roles) {
+  const safe = Array.isArray(roles) ? roles.filter(r => VALID_ROLES.includes(r)) : [];
+  return JSON.stringify(safe.length ? safe : ['staff']);
+}
+
 /**
  * GET /api/staff
  * Get all staff members
@@ -76,14 +85,15 @@ router.get('/:id', authenticateToken, async (req, res) => {
 router.post('/', authenticateToken, requireAdmin, async (req, res) => {
   const {
     fname, lname, email, phone, adult, smartserve,
-    y2024, y2025, y2026, y2027, y2028
+    y2024, y2025, y2026, y2027, y2028, roles
   } = req.body;
 
   try {
     // Generate ID
     const id = `staff_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const fullname = `${fname} ${lname}`;
-    
+    const rolesJson = normalizeRoles(roles);
+
     // Get next staff number
     const maxNoResult = await pool.query('SELECT MAX(no) as max_no FROM staff');
     const nextNo = (maxNoResult.rows[0].max_no || 0) + 1;
@@ -92,13 +102,13 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
       `INSERT INTO staff (
         id, no, fname, lname, fullname, email, phone, adult, smartserve,
         y2024, y2025, y2026, y2027, y2028,
-        created_date, updated_date, created_by_id, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW(), $15, $16)
+        created_date, updated_date, created_by_id, created_by, roles
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW(), $15, $16, $17::jsonb)
       RETURNING *`,
       [
         id, nextNo, fname, lname, fullname, email, phone, adult, smartserve,
         y2024, y2025, y2026, y2027, y2028,
-        req.user.userId, req.user.email
+        req.user.userId, req.user.email, rolesJson
       ]
     );
 
@@ -116,22 +126,23 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
 router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
   const {
     fname, lname, email, phone, adult, smartserve,
-    y2024, y2025, y2026, y2027, y2028
+    y2024, y2025, y2026, y2027, y2028, roles
   } = req.body;
 
   try {
     const fullname = `${fname} ${lname}`;
-    
+    const rolesJson = normalizeRoles(roles);
+
     const result = await pool.query(
       `UPDATE staff SET
         fname = $1, lname = $2, fullname = $3, email = $4, phone = $5,
         adult = $6, smartserve = $7, y2024 = $8, y2025 = $9, y2026 = $10,
-        y2027 = $11, y2028 = $12, updated_date = NOW()
-      WHERE id = $13
+        y2027 = $11, y2028 = $12, roles = $13::jsonb, updated_date = NOW()
+      WHERE id = $14
       RETURNING *`,
       [
         fname, lname, fullname, email, phone, adult, smartserve,
-        y2024, y2025, y2026, y2027, y2028, req.params.id
+        y2024, y2025, y2026, y2027, y2028, rolesJson, req.params.id
       ]
     );
 

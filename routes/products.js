@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { authenticateToken, requireRole } = require('../middleware/auth');
 const pool = require('../config/database');
 const router = express.Router();
 
@@ -43,7 +43,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST create product
-router.post('/', authenticateToken, requireAdmin, async (req, res) => {
+router.post('/', authenticateToken, requireRole('manager'), async (req, res) => {
   const { name, description, category, price, image_url, stripe_price_id, sizes, colors, stock, weight, length, width, height, variant_stock } = req.body;
   try {
     const id = `product_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -59,7 +59,7 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // PUT update product
-router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
+router.put('/:id', authenticateToken, requireRole('manager'), async (req, res) => {
   const { name, description, category, price, image_url, stripe_price_id, sizes, colors, stock, weight, length, width, height, variant_stock } = req.body;
   try {
     const result = await pool.query(
@@ -77,7 +77,7 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // DELETE product
-router.delete('/:id', authenticateToken, requireAdmin, async (req, res) => {
+router.delete('/:id', authenticateToken, requireRole('manager'), async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM products WHERE id = $1 RETURNING id', [req.params.id]);
     if (result.rows.length === 0) {

@@ -82,6 +82,13 @@ is also down or flaky** — mid-event, that's the moment a fallback matters.
 6. The standby is now the writer with no standby behind it. `merge-back.js`
    after the event runs from whichever PC ended up as the writer.
 
+**Using the standby as a workstation** (e.g. welcome-centre badge station)
+is fine and keeps it warm — but ONLY through the browser at
+`https://staff.holmdalerodeo.ca` like any other terminal. Never point
+anything on it at `localhost` — its local DB is a replica that gets
+overwritten every 2 minutes, so anything written locally is silently wiped.
+No shutdowns/reboots without the ops lead's OK; it's still the backup server.
+
 **Do not** re-add the old primary during the event unless you must; if you
 do, it comes back as the *standby* (blank `STANDBY_DATABASE_URL`, A records
 untouched, let the new writer push to it after setting `STANDBY_DATABASE_URL`

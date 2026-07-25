@@ -45,21 +45,22 @@ A second PC with the identical stack, kept 2 minutes behind the primary. It
 covers the case the cloud fallback can't: the Mini PC dying **while Starlink
 is also down or flaky** — mid-event, that's the moment a fallback matters.
 
-**Setup (once):**
-1. Run `provision-minipc.ps1` on the standby exactly like the primary,
-   including Technitium, certs (copy the same PEM files from the primary to
-   `C:\rodeo\certs`), `.env` (same `JWT_SECRET`!), and `onsite.env`
-   (its own local URL; leave `STANDBY_DATABASE_URL` blank on the standby).
-2. Register `RodeoAPI` + `RodeoCaddy` services like the primary. Create the
-   `RodeoTicketSync` / `RodeoBackup` scheduled tasks but add `/DISABLE` —
-   they're enabled only if the standby is promoted.
-3. Let the standby's Postgres accept the primary:
-   in `postgresql.conf` set `listen_addresses = '*'`; in `pg_hba.conf` add
-   `host rodeo postgres <primary-ip>/32 scram-sha-256`; restart the service;
-   allow TCP 5432 from the primary's IP in Windows Firewall.
-4. On the PRIMARY: set `STANDBY_DATABASE_URL` in `onsite.env` and add the task:
+**Setup (once) — fast path:**
+1. Copy the primary's whole `C:\rodeo` folder to the standby (USB stick or
+   share). This carries the repos + node_modules, `.env`, `onsite.env`,
+   certs and win-acme — all the secrets and fiddly bits in one move.
+   (Skip `C:\rodeo\backups` if you want a smaller copy.)
+2. Run `provision-minipc.ps1` as admin — with `C:\rodeo` already populated it
+   just installs the software (Postgres/Node/Git/Caddy/NSSM/Technitium).
+   Use the SAME postgres password as the primary when the installer asks.
+3. Run `setup-standby.ps1 -PostgresPassword <pw> -PrimaryIP <mini-pc-ip>`
+   as admin — creates the db, opens Postgres to the primary, registers the
+   services, creates the (disabled) scheduled tasks, firewall, power
+   settings, and fixes up `onsite.env` for the standby role.
+4. Technitium (manual, it's a web GUI — the script prints the exact values).
+5. On the PRIMARY: set `STANDBY_DATABASE_URL` in `onsite.env` and add the task:
    `schtasks /Create /TN RodeoStandbySync /SC MINUTE /MO 2 /RU SYSTEM /TR "powershell -NoProfile -File C:\rodeo\rodeo-fresh\scripts\onsite\sync-to-standby.ps1"`
-5. **DNS:** standby also runs Technitium with the same two zones, A records
+6. **DNS:** standby also runs Technitium with the same two zones, A records
    pointing at the **primary's** IP (not its own), **TTL 30 seconds**, zones
    enabled at cutover along with the primary's. The event router's DHCP hands
    out BOTH PCs as DNS servers (primary first). Both resolvers give the same

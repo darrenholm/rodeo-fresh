@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { Pool } = require('pg');
+const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
 // Fallback when a shift predates the persons_required column
@@ -10,11 +10,6 @@ const personsRequired = (shift) => {
   const n = parseInt(shift.persons_required);
   return Number.isInteger(n) && n > 0 ? n : DEFAULT_PERSONS_REQUIRED;
 };
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
 
 // GET all shifts with assignment counts
 router.get('/', authenticateToken, async (req, res) => {

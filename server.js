@@ -543,6 +543,30 @@ if (process.env.FB_PAGE_ACCESS_TOKEN) {
     }
   });
   console.log('🗓️  Daily sponsor spotlight scheduled (15:00 UTC)');
+  // Daily rodeo countdown — 12:00 UTC (~8am ET). Counts down to July 31,
+  // switches to day-of hype posts Fri–Sun, then goes silent (lib/countdown.js).
+  cron.schedule('0 12 * * *', async () => {
+    try {
+      const r = await require('./lib/countdown').postCountdown();
+      console.log('[cron] daily countdown:', JSON.stringify(r));
+    } catch (e) {
+      console.error('[cron] daily countdown failed:', e.message);
+    }
+  });
+  console.log('⏳ Daily rodeo countdown scheduled (12:00 UTC)');
+  // Boot catch-up: if today's countdown post was missed (deploy/restart after
+  // the 12:00 UTC slot), post it now — but never before 8am Toronto. The
+  // already-posted-today check in postCountdown() prevents doubles.
+  setTimeout(async () => {
+    try {
+      const hour = parseInt(new Date().toLocaleString('en-US', { timeZone: 'America/Toronto', hour: '2-digit', hour12: false }), 10);
+      if (hour < 8) return;
+      const r = await require('./lib/countdown').postCountdown();
+      console.log('[boot] countdown catch-up:', JSON.stringify(r));
+    } catch (e) {
+      console.error('[boot] countdown catch-up failed:', e.message);
+    }
+  }, 30000);
 } else {
   console.log('⚠️  FB_PAGE_ACCESS_TOKEN not set — daily spotlight disabled');
 }

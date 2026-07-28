@@ -27,6 +27,31 @@ router.get('/spotlight/preview', authenticateToken, async (req, res) => {
   }
 });
 
+// ─── POST /api/social/countdown/next — post today's countdown post now (admin) ───
+// Body { force:true } to post even if one already went out today.
+router.post('/countdown/next', authenticateToken, async (req, res) => {
+  try {
+    const countdown = require('../lib/countdown');
+    const result = await countdown.postCountdown({ force: req.body && req.body.force === true });
+    res.json(result);
+  } catch (err) {
+    console.error('POST /social/countdown/next error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /api/social/countdown/preview — today's countdown caption, no posting ───
+router.get('/countdown/preview', authenticateToken, async (req, res) => {
+  try {
+    const countdown = require('../lib/countdown');
+    const plan = countdown.todaysMode();
+    if (!plan) return res.json({ next: null, note: 'rodeo weekend is over' });
+    res.json({ ...plan, caption: countdown.buildCaption(plan) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/social/report — send the weekly status report now (admin) ───
 router.post('/report', authenticateToken, async (req, res) => {
   try {

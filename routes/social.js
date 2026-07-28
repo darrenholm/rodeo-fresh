@@ -40,6 +40,19 @@ router.post('/countdown/next', authenticateToken, async (req, res) => {
   }
 });
 
+// ─── POST /api/social/schedule/next — post the evening schedule post now (admin) ───
+// Body { force:true } to post even if one already went out today.
+router.post('/schedule/next', authenticateToken, async (req, res) => {
+  try {
+    const countdown = require('../lib/countdown');
+    const result = await countdown.postSchedule({ force: req.body && req.body.force === true });
+    res.json(result);
+  } catch (err) {
+    console.error('POST /social/schedule/next error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── GET /api/social/countdown/preview — today's countdown caption, no posting ───
 router.get('/countdown/preview', authenticateToken, async (req, res) => {
   try {

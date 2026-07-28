@@ -554,6 +554,17 @@ if (process.env.FB_PAGE_ACCESS_TOKEN) {
     }
   });
   console.log('⏳ Daily rodeo countdown scheduled (12:00 UTC)');
+  // Evening schedule post — 22:00 UTC (~6pm ET). Full schedule ON the image
+  // so nobody has to expand the caption. Same silent-after-Aug-2 behavior.
+  cron.schedule('0 22 * * *', async () => {
+    try {
+      const r = await require('./lib/countdown').postSchedule();
+      console.log('[cron] evening schedule:', JSON.stringify(r));
+    } catch (e) {
+      console.error('[cron] evening schedule failed:', e.message);
+    }
+  });
+  console.log('📋 Evening schedule post scheduled (22:00 UTC)');
   // Boot catch-up: if today's countdown post was missed (deploy/restart after
   // the 12:00 UTC slot), post it now — but never before 8am Toronto. The
   // already-posted-today check in postCountdown() prevents doubles.
@@ -563,6 +574,10 @@ if (process.env.FB_PAGE_ACCESS_TOKEN) {
       if (hour < 8) return;
       const r = await require('./lib/countdown').postCountdown();
       console.log('[boot] countdown catch-up:', JSON.stringify(r));
+      if (hour >= 18) {
+        const s = await require('./lib/countdown').postSchedule();
+        console.log('[boot] schedule catch-up:', JSON.stringify(s));
+      }
     } catch (e) {
       console.error('[boot] countdown catch-up failed:', e.message);
     }

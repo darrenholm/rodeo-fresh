@@ -1,24 +1,55 @@
-# Onsite Caddy config — Mini PC serves the staff portal + API over HTTPS
-# with real Let's Encrypt certs issued via manual DNS-01 (see README).
+# Onsite Caddy config — Mini PC serves the staff portal + API.
+# This is the file the RodeoCaddy service loads (nssm AppParameters).
+#
+# Three access tiers:
+#  - https://  : phones/tablets — real Let's Encrypt SAN cert (both names)
+#  - http://   : TV display pages only (old TVs lack the LE root cert);
+#                everything else redirects to https
+#  - raw IP    : http://192.168.0.101/... for TVs whose DNS can't be fixed —
+#                no DNS involved; /api is proxied same-origin
 
 {
 	auto_https off
 }
 
 https://staff.holmdalerodeo.ca {
-	tls C:/rodeo/certs/staff.crt C:/rodeo/certs/staff.key
+	tls C:/rodeo/certs/fullchain.pem C:/rodeo/certs/privkey.pem
 	root * C:/rodeo/holmdale-staff-portal/public
 	file_server
-	# menu page lives at / -> index.html
 	try_files {path} {path}.html /index.html
+	encode gzip
 }
 
 https://api.holmdalerodeo.ca {
-	tls C:/rodeo/certs/api.crt C:/rodeo/certs/api.key
-	reverse_proxy localhost:3000
+	tls C:/rodeo/certs/fullchain.pem C:/rodeo/certs/privkey.pem
+	reverse_proxy 127.0.0.1:3000
 }
 
-# plain-HTTP redirect so typed URLs still land somewhere sane
-http://staff.holmdalerodeo.ca, http://api.holmdalerodeo.ca {
-	redir https://{host}{uri} permanent
+http://staff.holmdalerodeo.ca {
+	root * C:/rodeo/holmdale-staff-portal/public
+	@tv path /rodeo-kitchen-customer.html /rodeo-kitchen-staff.html /rodeo-icecream-display.html /rodeo-live-dashboard.html /lib/* /*.png /favicon.ico
+	handle @tv {
+		file_server
+	}
+	handle {
+		redir https://{host}{uri} permanent
+	}
+	encode gzip
+}
+
+http://api.holmdalerodeo.ca {
+	reverse_proxy 127.0.0.1:3000
+}
+
+# Raw-IP access (TVs that ignore DHCP DNS): serve the portal for any
+# unmatched host and proxy /api same-origin.
+http:// {
+	root * C:/rodeo/holmdale-staff-portal/public
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3000
+	}
+	handle {
+		file_server
+	}
+	encode gzip
 }

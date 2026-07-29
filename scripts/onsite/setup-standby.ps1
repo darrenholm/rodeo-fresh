@@ -92,10 +92,12 @@ schtasks /Create /F /TN RodeoBackup /SC MINUTE /MO 15 /RU SYSTEM /DISABLE `
     /TR "powershell -NoProfile -File $ROOT\rodeo-fresh\scripts\onsite\backup-dump.ps1" | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'schtasks failed creating RodeoBackup' }
 
-Step 'Firewall (HTTPS, DNS, Postgres from primary only)'
+Step 'Firewall (HTTPS, DNS, Postgres from primary only, ping)'
 netsh advfirewall firewall add rule name="Rodeo HTTPS" dir=in action=allow protocol=TCP localport=443 | Out-Null
 netsh advfirewall firewall add rule name="Rodeo DNS" dir=in action=allow protocol=UDP localport=53 | Out-Null
 netsh advfirewall firewall add rule name="Rodeo PG from primary" dir=in action=allow protocol=TCP localport=5432 remoteip=$PrimaryIP | Out-Null
+# Windows blocks inbound ICMP echo by default; allow it so 'ping' works for LAN sanity checks
+netsh advfirewall firewall add rule name="Rodeo ICMP" dir=in action=allow protocol=icmpv4:8,any | Out-Null
 
 Step 'Power settings (never sleep)'
 powercfg /change standby-timeout-ac 0

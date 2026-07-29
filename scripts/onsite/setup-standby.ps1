@@ -73,10 +73,15 @@ if (-not (Get-Service RodeoCaddy -ErrorAction SilentlyContinue)) {
 Start-Service RodeoAPI, RodeoCaddy
 
 Step 'Scheduled tasks (created DISABLED - enabled only if this PC is promoted)'
-schtasks /Create /F /TN RodeoTicketSync /SC MINUTE /MO 2 /RU SYSTEM /DISABLE `
-    /TR "`"$node`" $ROOT\rodeo-fresh\scripts\onsite\sync-ticket-orders.js" | Out-Null
+# \" (not `") around $node: PowerShell 5.1 wraps a whitespace-containing native
+# arg in quotes WITHOUT escaping embedded ones, so `" reaches schtasks as
+# ""C:\Program... and the /TR value splits. Backslash-escaped quotes survive.
+$syncTr = "\`"$node\`" $ROOT\rodeo-fresh\scripts\onsite\sync-ticket-orders.js"
+schtasks /Create /F /TN RodeoTicketSync /SC MINUTE /MO 2 /RU SYSTEM /DISABLE /TR $syncTr | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'schtasks failed creating RodeoTicketSync' }
 schtasks /Create /F /TN RodeoBackup /SC MINUTE /MO 15 /RU SYSTEM /DISABLE `
     /TR "powershell -NoProfile -File $ROOT\rodeo-fresh\scripts\onsite\backup-dump.ps1" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'schtasks failed creating RodeoBackup' }
 
 Step 'Firewall (HTTPS, DNS, Postgres from primary only)'
 netsh advfirewall firewall add rule name="Rodeo HTTPS" dir=in action=allow protocol=TCP localport=443 | Out-Null

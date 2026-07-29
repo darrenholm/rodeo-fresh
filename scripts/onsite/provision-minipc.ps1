@@ -5,6 +5,9 @@
 # .env secrets, cert issuance, DNS overrides.
 
 $ErrorActionPreference = 'Stop'
+# PS 5.1 renders a progress bar per chunk during Invoke-WebRequest, throttling
+# downloads to a crawl on big files - silence it for the whole run.
+$ProgressPreference = 'SilentlyContinue'
 $ROOT = 'C:\rodeo'
 
 Write-Host "=== Holmdale Rodeo onsite server provisioning ===" -ForegroundColor Green
@@ -31,22 +34,28 @@ $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Env
 
 New-Item -ItemType Directory -Force $ROOT | Out-Null
 
-# Technitium DNS is not in winget - fetch the official installer and run it
-# (click through; defaults are fine).
-if (-not (Test-Path 'C:\Program Files\Technitium\DNS Server')) {
+# Technitium DNS is not in winget - fetch the official installer and run it.
+# Detect by SERVICE, not path: the installer defaults to Program Files (x86)
+# ({commonpf32} in its Inno Setup script), so a Test-Path under plain
+# 'Program Files' misses an existing install and relaunches the installer,
+# which then blocks at -Wait until a human clicks through it.
+if (Get-Service DnsService -ErrorAction SilentlyContinue) {
+  Write-Host "Technitium DNS already installed (DnsService exists) - skipping" -ForegroundColor Cyan
+} else {
   Write-Host "installing Technitium DNS..." -ForegroundColor Cyan
   $dnsZip = "$env:TEMP\DnsServerSetup.zip"
-  Invoke-WebRequest 'https://download.technitium.com/dns/DnsServerSetup.zip' -OutFile $dnsZip
+  Invoke-WebRequest 'https://download.technitium.com/dns/DnsServerSetup.zip' -OutFile $dnsZip -UseBasicParsing
   Expand-Archive $dnsZip -DestinationPath "$env:TEMP\DnsServerSetup" -Force
   $dnsSetup = Get-ChildItem "$env:TEMP\DnsServerSetup" -Filter *.exe -Recurse | Select-Object -First 1
-  Start-Process $dnsSetup.FullName -Wait
+  # Inno Setup installer - run it silent so provisioning never sits on a GUI
+  Start-Process $dnsSetup.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
 }
 
 # win-acme is not in winget either - grab the release zip; wacs.exe lands in C:\rodeo\win-acme
 if (-not (Test-Path "$ROOT\win-acme\wacs.exe")) {
   Write-Host "installing win-acme..." -ForegroundColor Cyan
   $wacsZip = "$env:TEMP\win-acme.zip"
-  Invoke-WebRequest 'https://github.com/win-acme/win-acme/releases/download/v2.2.9.1701/win-acme.v2.2.9.1701.x64.pluggable.zip' -OutFile $wacsZip
+  Invoke-WebRequest 'https://github.com/win-acme/win-acme/releases/download/v2.2.9.1701/win-acme.v2.2.9.1701.x64.pluggable.zip' -OutFile $wacsZip -UseBasicParsing
   Expand-Archive $wacsZip -DestinationPath "$ROOT\win-acme" -Force
 }
 
@@ -99,9 +108,11 @@ Then register services (as admin):
   nssm set RodeoCaddy Start SERVICE_AUTO_START
   nssm start RodeoCaddy
 
-Scheduled tasks:
-  schtasks /Create /TN RodeoTicketSync /SC MINUTE /MO 2 /RU SYSTEM /TR "\"C:\Program Files\nodejs\node.exe\" $ROOT\rodeo-fresh\scripts\onsite\sync-ticket-orders.js"
-  schtasks /Create /TN RodeoBackup     /SC MINUTE /MO 15 /RU SYSTEM /TR "powershell -NoProfile -File $ROOT\rodeo-fresh\scripts\onsite\backup-dump.ps1"
+Scheduled tasks (paste into PowerShell as-is; the single quotes + \" are what
+survive PowerShell 5.1's native-arg handling so schtasks stores a quoted
+node.exe path):
+  schtasks /Create /TN RodeoTicketSync /SC MINUTE /MO 2 /RU SYSTEM /TR '\"C:\Program Files\nodejs\node.exe\" $ROOT\rodeo-fresh\scripts\onsite\sync-ticket-orders.js'
+  schtasks /Create /TN RodeoBackup     /SC MINUTE /MO 15 /RU SYSTEM /TR 'powershell -NoProfile -File $ROOT\rodeo-fresh\scripts\onsite\backup-dump.ps1'
 
 Certs (week before event): run $ROOT\win-acme\wacs.exe, manual DNS-01 for
   staff.holmdalerodeo.ca + api.holmdalerodeo.ca (add the TXT records it prints

@@ -49,7 +49,9 @@ Two Windows PCs at the grounds, identical stacks:
 
 Each PC runs, under `C:\rodeo`:
 
-- **Postgres** — the local `rodeo` database. Version may differ per PC; scripts auto-detect it.
+- **Postgres 17** — the local `rodeo_db` database. Both PCs must run the same
+  major version (the primary's `pg_dump` pushes into the standby); scripts
+  auto-detect the installed version.
 - **RodeoAPI** (Windows service via NSSM) — the Node API on port 3000.
 - **RodeoCaddy** (Windows service via NSSM) — HTTPS on 443, serves the portal
   pages from `C:\rodeo\holmdale-staff-portal\public` and proxies `/api` to
@@ -136,7 +138,7 @@ On the primary:
 3. Standby sync is landing: on the **standby**, this number should move
    within ~2 minutes of a sale on the primary:
    ```powershell
-   & "$(Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory | Select -First 1 -Expand FullName)\bin\psql" -U postgres -h localhost -d rodeo -c "SELECT COUNT(*) FROM bar_transactions"
+   & "$(Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory | Select -First 1 -Expand FullName)\bin\psql" -U postgres -h localhost -d rodeo_db -c "SELECT COUNT(*) FROM bar_transactions"
    ```
 4. Online orders are syncing in (needs Starlink): gate can look up a
    just-bought online ticket within ~2 minutes.

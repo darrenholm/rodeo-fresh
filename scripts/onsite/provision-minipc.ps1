@@ -16,7 +16,10 @@ Write-Host "=== Holmdale Rodeo onsite server provisioning ===" -ForegroundColor 
 # --source winget: the msstore source fails cert checks on some machines and
 # aborts the whole install; everything we need lives in the community source.
 $pkgs = @(
-  @{ id = 'PostgreSQL.PostgreSQL.16'; name = 'Postgres 16' },
+  # Must match the primary's major version (17): sync-to-standby.ps1 runs the
+  # primary's pg_dump/pg_restore against this box, and restoring a v17 dump
+  # into a v16 server is not supported.
+  @{ id = 'PostgreSQL.PostgreSQL.17'; name = 'Postgres 17' },
   @{ id = 'OpenJS.NodeJS.LTS';        name = 'Node LTS' },
   @{ id = 'Git.Git';                  name = 'Git' },
   @{ id = 'CaddyServer.Caddy';        name = 'Caddy' },
@@ -69,20 +72,22 @@ Set-Location "$ROOT\rodeo-fresh"; npm install --omit=dev
 Write-Host @"
 
 MANUAL STEP - create the database:
-  & 'C:\Program Files\PostgreSQL\16\bin\psql' -U postgres -c "CREATE DATABASE rodeo"
+  & 'C:\Program Files\PostgreSQL\17\bin\psql' -U postgres -c "CREATE DATABASE rodeo_db"
 
   The silent installer may not have asked for a superuser password. If psql
-  prompts for one you don't know: open C:\Program Files\PostgreSQL\16\data\pg_hba.conf,
+  prompts for one you don't know: open C:\Program Files\PostgreSQL\17\data\pg_hba.conf,
   change the METHOD column on the '127.0.0.1/32' and '::1/128' lines to trust,
-  run 'Restart-Service postgresql-x64-16', then set one:
-    & 'C:\Program Files\PostgreSQL\16\bin\psql' -U postgres -c "ALTER USER postgres PASSWORD 'yourpassword'"
+  run 'Restart-Service postgresql-x64-17', then set one:
+    & 'C:\Program Files\PostgreSQL\17\bin\psql' -U postgres -c "ALTER USER postgres PASSWORD 'yourpassword'"
   and change the METHOD lines back to scram-sha-256 + restart again.
 
 MANUAL STEP - secrets:
   1. Copy $ROOT\rodeo-fresh\scripts\onsite\onsite.env.example -> onsite.env and fill in
      (CLOUD_DATABASE_URL from Railway Postgres 'DATABASE_PUBLIC_URL'; local URL with your postgres password)
   2. Create $ROOT\rodeo-fresh\.env with:
-       DATABASE_URL=postgresql://postgres:<pw>@localhost:5432/rodeo
+       DATABASE_URL=postgresql://postgres:<pw>@localhost:5432/rodeo_db
+       (percent-encode reserved chars in <pw> — an '@' must be written %40, or
+        libpq reads the rest of the password as the hostname)
        JWT_SECRET=<SAME value as Railway rodeo-fresh service>   <- tokens then work on both
        PORT=3000
        STRIPE_SECRET_KEY=..., STRIPE_WEBHOOK_SECRET=..., MONERIS_*=..., RESEND_API_KEY=...,
@@ -117,7 +122,8 @@ node.exe path):
 Certs (week before event): run $ROOT\win-acme\wacs.exe, manual DNS-01 for
   staff.holmdalerodeo.ca + api.holmdalerodeo.ca (add the TXT records it prints
   in WHC cPanel Zone Editor). Export PEM files to $ROOT\certs\ as
-  staff.crt/staff.key/api.crt/api.key (paths the Caddyfile expects).
+  fullchain.pem/privkey.pem — one SAN cert covering both names, which is what
+  the current Caddyfile loads (the older staff.crt/api.crt split is unused).
 
 Technitium (http://localhost:5380 after install): set forwarders to Starlink/8.8.8.8,
 add zones staff.holmdalerodeo.ca and api.holmdalerodeo.ca each with one A record ->

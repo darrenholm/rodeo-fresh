@@ -1,5 +1,9 @@
 # Onsite Server (Mini PC) — Setup & Event Runbook
 
+> **New here / covering for Darren?** Start with [`HANDBOOK.md`](../../HANDBOOK.md)
+> at the repo root — the whole-system picture, event timeline, and failure
+> playbooks. This file is the detailed onsite setup reference.
+
 Runs the whole rodeo system (portal + API + Postgres) on the GMKtec G10 at the
 grounds during event days. Same URLs as production — local DNS decides whether
 devices hit the Mini PC or the cloud. **Onsite is the source of truth during

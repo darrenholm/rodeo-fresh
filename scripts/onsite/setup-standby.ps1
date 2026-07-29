@@ -62,6 +62,9 @@ if (-not (Test-Path $envFile)) { throw "$envFile missing - was C:\rodeo copied f
 $lines = Get-Content $envFile
 $lines = $lines -replace '^LOCAL_DATABASE_URL=.*', "LOCAL_DATABASE_URL=postgresql://postgres:$PostgresPassword@localhost:5432/rodeo"
 $lines = $lines -replace '^STANDBY_DATABASE_URL=.+', 'STANDBY_DATABASE_URL='   # standby pushes to nobody
+# onsite.env was copied from the primary; its PG_BIN may point at a Postgres
+# version this PC doesn't have - use the one detected above.
+$lines = $lines -replace '^PG_BIN=.*', "PG_BIN=$PGBIN"
 Set-Content $envFile $lines
 
 Step 'Registering services (RodeoAPI, RodeoCaddy)'

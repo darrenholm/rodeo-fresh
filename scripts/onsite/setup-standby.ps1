@@ -19,11 +19,20 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ROOT = 'C:\rodeo'
-$PGDATA = 'C:\Program Files\PostgreSQL\16\data'
-$PGBIN = 'C:\Program Files\PostgreSQL\16\bin'
 $env:PGPASSWORD = $PostgresPassword
 
 function Step($label) { Write-Host "== $label ==" -ForegroundColor Cyan }
+
+Step 'Locating PostgreSQL (version differs box to box - do not hardcode 16)'
+$pgInstall = Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory -ErrorAction SilentlyContinue |
+    Where-Object { Test-Path "$($_.FullName)\bin\psql.exe" } |
+    Sort-Object { [int]$_.Name } -Descending | Select-Object -First 1
+if (-not $pgInstall) { throw "No PostgreSQL found under C:\Program Files\PostgreSQL - did provision-minipc.ps1 run?" }
+$PGBIN = "$($pgInstall.FullName)\bin"
+$PGDATA = "$($pgInstall.FullName)\data"
+$pgService = Get-Service 'postgresql*' | Select-Object -First 1
+if (-not $pgService) { throw 'PostgreSQL is installed but no postgresql* service exists' }
+Write-Host "  using $PGBIN (service: $($pgService.Name))"
 
 Step 'Creating rodeo database (if missing)'
 $exists = & "$PGBIN\psql" -U postgres -h localhost -tAc "SELECT 1 FROM pg_database WHERE datname='rodeo'"
@@ -45,7 +54,7 @@ $hba = Get-Content "$PGDATA\pg_hba.conf" -Raw
 if ($hba -notmatch [regex]::Escape("$PrimaryIP/32")) {
     Add-Content "$PGDATA\pg_hba.conf" "`n$hbaLine"
 }
-Restart-Service postgresql-x64-16
+Restart-Service $pgService.Name
 
 Step 'onsite.env fixups (this PC is the standby)'
 $envFile = "$ROOT\rodeo-fresh\scripts\onsite\onsite.env"

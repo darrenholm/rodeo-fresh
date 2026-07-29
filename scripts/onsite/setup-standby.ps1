@@ -30,7 +30,10 @@ $PGVER = (Get-ChildItem $PGROOT -Directory -ErrorAction SilentlyContinue |
 if (-not $PGVER) { throw "No PostgreSQL install with a bin\pg_dump.exe found under $PGROOT" }
 $PGDATA = "$PGROOT\$PGVER\data"
 $PGBIN = "$PGROOT\$PGVER\bin"
-Write-Host "Using PostgreSQL $PGVER ($PGBIN)" -ForegroundColor DarkGray
+$pgService = Get-Service "postgresql-x64-$PGVER" -ErrorAction SilentlyContinue
+if (-not $pgService) { $pgService = Get-Service 'postgresql*' -ErrorAction SilentlyContinue | Select-Object -First 1 }
+if (-not $pgService) { throw "PostgreSQL $PGVER is installed but no postgresql* service is registered" }
+Write-Host "Using PostgreSQL $PGVER ($PGBIN, service $($pgService.Name))" -ForegroundColor DarkGray
 $env:PGPASSWORD = $PostgresPassword
 
 function Step($label) { Write-Host "== $label ==" -ForegroundColor Cyan }
@@ -55,7 +58,7 @@ $hba = Get-Content "$PGDATA\pg_hba.conf" -Raw
 if ($hba -notmatch [regex]::Escape("$PrimaryIP/32")) {
     Add-Content "$PGDATA\pg_hba.conf" "`n$hbaLine"
 }
-Restart-Service "postgresql-x64-$PGVER"
+Restart-Service $pgService.Name
 
 Step 'onsite.env fixups (this PC is the standby)'
 $envFile = "$ROOT\rodeo-fresh\scripts\onsite\onsite.env"
@@ -88,17 +91,24 @@ Start-Service RodeoAPI, RodeoCaddy
 
 Step 'Scheduled tasks (created DISABLED - enabled only if this PC is promoted)'
 # /Create has no /DISABLE option (it errors out) - create, then disable.
-schtasks /Create /F /TN RodeoTicketSync /SC MINUTE /MO 2 /RU SYSTEM `
-    /TR "`"$node`" $ROOT\rodeo-fresh\scripts\onsite\sync-ticket-orders.js" | Out-Null
+# \" (not `") around $node: PowerShell 5.1 wraps a whitespace-containing native
+# arg in quotes WITHOUT escaping embedded ones, so `" reaches schtasks as
+# ""C:\Program... and the /TR value splits. Backslash-escaped quotes survive.
+$syncTr = "\`"$node\`" $ROOT\rodeo-fresh\scripts\onsite\sync-ticket-orders.js"
+schtasks /Create /F /TN RodeoTicketSync /SC MINUTE /MO 2 /RU SYSTEM /TR $syncTr | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'schtasks failed creating RodeoTicketSync' }
 schtasks /Change /TN RodeoTicketSync /DISABLE | Out-Null
 schtasks /Create /F /TN RodeoBackup /SC MINUTE /MO 15 /RU SYSTEM `
     /TR "powershell -NoProfile -ExecutionPolicy Bypass -File $ROOT\rodeo-fresh\scripts\onsite\backup-dump.ps1" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'schtasks failed creating RodeoBackup' }
 schtasks /Change /TN RodeoBackup /DISABLE | Out-Null
 
-Step 'Firewall (HTTPS, DNS, Postgres from primary only)'
+Step 'Firewall (HTTPS, DNS, Postgres from primary only, ping)'
 netsh advfirewall firewall add rule name="Rodeo HTTPS" dir=in action=allow protocol=TCP localport=443 | Out-Null
 netsh advfirewall firewall add rule name="Rodeo DNS" dir=in action=allow protocol=UDP localport=53 | Out-Null
 netsh advfirewall firewall add rule name="Rodeo PG from primary" dir=in action=allow protocol=TCP localport=5432 remoteip=$PrimaryIP | Out-Null
+# Windows blocks inbound ICMP echo by default; allow it so 'ping' works for LAN sanity checks
+netsh advfirewall firewall add rule name="Rodeo ICMP" dir=in action=allow protocol=icmpv4:8,any | Out-Null
 
 Step 'Power settings (never sleep)'
 powercfg /change standby-timeout-ac 0

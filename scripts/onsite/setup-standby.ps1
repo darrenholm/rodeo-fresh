@@ -19,19 +19,29 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ROOT = 'C:\rodeo'
-$PGDATA = 'C:\Program Files\PostgreSQL\16\data'
-$PGBIN = 'C:\Program Files\PostgreSQL\16\bin'
+$DBNAME = 'rodeo_db'          # must match the primary's database name
+# Detect the installed PostgreSQL rather than hardcoding a version: a stale
+# empty 16 folder alongside a real 17 install is exactly how the primary's
+# PG_BIN ended up pointing at nothing.
+$PGROOT = 'C:\Program Files\PostgreSQL'
+$PGVER = (Get-ChildItem $PGROOT -Directory -ErrorAction SilentlyContinue |
+    Where-Object { Test-Path "$($_.FullName)\bin\pg_dump.exe" } |
+    Sort-Object { [int]$_.Name } -Descending | Select-Object -First 1).Name
+if (-not $PGVER) { throw "No PostgreSQL install with a bin\pg_dump.exe found under $PGROOT" }
+$PGDATA = "$PGROOT\$PGVER\data"
+$PGBIN = "$PGROOT\$PGVER\bin"
+Write-Host "Using PostgreSQL $PGVER ($PGBIN)" -ForegroundColor DarkGray
 $env:PGPASSWORD = $PostgresPassword
 
 function Step($label) { Write-Host "== $label ==" -ForegroundColor Cyan }
 
-Step 'Creating rodeo database (if missing)'
-$exists = & "$PGBIN\psql" -U postgres -h localhost -tAc "SELECT 1 FROM pg_database WHERE datname='rodeo'"
+Step "Creating $DBNAME database (if missing)"
+$exists = & "$PGBIN\psql" -U postgres -h localhost -tAc "SELECT 1 FROM pg_database WHERE datname='$DBNAME'"
 if ($LASTEXITCODE -ne 0) {
     throw "Cannot talk to Postgres. If the password is unknown, see the pg_hba trust dance in provision-minipc.ps1"
 }
 if ($exists -ne '1') {
-    & "$PGBIN\createdb" -U postgres -h localhost rodeo
+    & "$PGBIN\createdb" -U postgres -h localhost $DBNAME
     if ($LASTEXITCODE -ne 0) { throw 'createdb failed' }
 }
 
@@ -45,14 +55,18 @@ $hba = Get-Content "$PGDATA\pg_hba.conf" -Raw
 if ($hba -notmatch [regex]::Escape("$PrimaryIP/32")) {
     Add-Content "$PGDATA\pg_hba.conf" "`n$hbaLine"
 }
-Restart-Service postgresql-x64-16
+Restart-Service "postgresql-x64-$PGVER"
 
 Step 'onsite.env fixups (this PC is the standby)'
 $envFile = "$ROOT\rodeo-fresh\scripts\onsite\onsite.env"
 if (-not (Test-Path $envFile)) { throw "$envFile missing - was C:\rodeo copied from the primary?" }
 $lines = Get-Content $envFile
-$lines = $lines -replace '^LOCAL_DATABASE_URL=.*', "LOCAL_DATABASE_URL=postgresql://postgres:$PostgresPassword@localhost:5432/rodeo"
+# URL-encode: libpq splits userinfo on the FIRST '@', so a password containing
+# '@' (as the primary's does) silently becomes part of the hostname.
+$pwEnc = [uri]::EscapeDataString($PostgresPassword)
+$lines = $lines -replace '^LOCAL_DATABASE_URL=.*', "LOCAL_DATABASE_URL=postgresql://postgres:$pwEnc@localhost:5432/$DBNAME"
 $lines = $lines -replace '^STANDBY_DATABASE_URL=.+', 'STANDBY_DATABASE_URL='   # standby pushes to nobody
+$lines = $lines -replace '^PG_BIN=.*', "PG_BIN=$PGBIN"                          # match this PC's actual install
 Set-Content $envFile $lines
 
 Step 'Registering services (RodeoAPI, RodeoCaddy)'
@@ -73,10 +87,13 @@ if (-not (Get-Service RodeoCaddy -ErrorAction SilentlyContinue)) {
 Start-Service RodeoAPI, RodeoCaddy
 
 Step 'Scheduled tasks (created DISABLED - enabled only if this PC is promoted)'
-schtasks /Create /F /TN RodeoTicketSync /SC MINUTE /MO 2 /RU SYSTEM /DISABLE `
+# /Create has no /DISABLE option (it errors out) - create, then disable.
+schtasks /Create /F /TN RodeoTicketSync /SC MINUTE /MO 2 /RU SYSTEM `
     /TR "`"$node`" $ROOT\rodeo-fresh\scripts\onsite\sync-ticket-orders.js" | Out-Null
-schtasks /Create /F /TN RodeoBackup /SC MINUTE /MO 15 /RU SYSTEM /DISABLE `
-    /TR "powershell -NoProfile -File $ROOT\rodeo-fresh\scripts\onsite\backup-dump.ps1" | Out-Null
+schtasks /Change /TN RodeoTicketSync /DISABLE | Out-Null
+schtasks /Create /F /TN RodeoBackup /SC MINUTE /MO 15 /RU SYSTEM `
+    /TR "powershell -NoProfile -ExecutionPolicy Bypass -File $ROOT\rodeo-fresh\scripts\onsite\backup-dump.ps1" | Out-Null
+schtasks /Change /TN RodeoBackup /DISABLE | Out-Null
 
 Step 'Firewall (HTTPS, DNS, Postgres from primary only)'
 netsh advfirewall firewall add rule name="Rodeo HTTPS" dir=in action=allow protocol=TCP localport=443 | Out-Null

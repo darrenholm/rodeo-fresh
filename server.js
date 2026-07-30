@@ -174,6 +174,18 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Onsite machines POST their update-script output here (clipboard-out is
+// broken over remote consoles). The log lands in Railway logs where the
+// office can read it: railway logs --service rodeo-fresh | grep onsite-report
+app.post('/api/onsite/report', express.text({ type: '*/*', limit: '64kb' }), (req, res) => {
+  const machine = String(req.query.machine || 'unknown').slice(0, 40);
+  const body = String(req.body || '').slice(0, 60000);
+  console.log(`[onsite-report] ===== ${machine} @ ${new Date().toISOString()} =====`);
+  body.split('\n').forEach((l) => console.log(`[onsite-report] ${machine}| ${l}`));
+  console.log(`[onsite-report] ===== end ${machine} =====`);
+  res.json({ ok: true });
+});
+
 app.get('/', (req, res) => {
   res.json({
     message: 'Holmdale Rodeo API',

@@ -1,3 +1,4 @@
+require('dotenv').config();   // standalone runs (onsite Mini PC) get creds from .env; Railway injects env itself
 const fs = require('fs');
 const pool = require('../config/database');
 

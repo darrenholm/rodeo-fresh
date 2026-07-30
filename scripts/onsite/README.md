@@ -109,6 +109,17 @@ Pulls both repos, installs deps, runs migrations, restarts `RodeoAPI`, and
 checks `/health`. Portal pages need no restart (Caddy serves the repo folder).
 **Code freeze once the event starts** — mid-event only for urgent fixes.
 
+## Badge print station (Seaory S25)
+
+The check-in laptop that drives the Seaory S25 card printer must run the
+**print bridge** (`scripts/print-bridge/`) — the badge pages POST the rendered
+card to `http://127.0.0.1:7777` and without the bridge nothing prints (badges
+just pile up in the queue). One-time setup on that laptop:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File C:\rodeo\rodeo-fresh\scripts\print-bridge\install-print-bridge.ps1
+
+Full setup + day-of checklist: [`scripts/print-bridge/README.md`](../print-bridge/README.md).
+
 ## Event runbook
 
 **Cutover (Jul 30 evening)**

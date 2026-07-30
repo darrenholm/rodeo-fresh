@@ -92,6 +92,36 @@ router.get('/photos/:file', (req, res) => {
   res.sendFile(fpath);
 });
 
+// ─── GET /api/badges/logo?src=<blob url> — serve-through logo cache ───
+// Badge pages route sponsor-logo blob URLs through here so the onsite
+// server can print badges with logos while offline. First request (with
+// internet) downloads + caches; later requests serve from disk. The
+// onsite pre-warm script (scripts/onsite/cache-logos.js) fills the cache
+// ahead of the event using the same sha1(src) naming.
+const crypto = require('crypto');
+const LOGO_CACHE_DIR = process.env.LOGO_CACHE_DIR || path.join(__dirname, '..', 'data', 'logo-cache');
+router.get('/logo', async (req, res) => {
+  const src = String(req.query.src || '');
+  if (!/^https:\/\/[a-z0-9]+\.public\.blob\.vercel-storage\.com\//i.test(src)) {
+    return res.status(400).json({ error: 'src must be a Vercel Blob URL' });
+  }
+  const key = crypto.createHash('sha1').update(src).digest('hex');
+  const extM = /\.(png|jpe?g|gif|webp|svg)(?:\?|$)/i.exec(src);
+  const ext = extM ? extM[1].toLowerCase().replace('jpeg', 'jpg') : 'png';
+  const fpath = path.join(LOGO_CACHE_DIR, `${key}.${ext}`);
+  if (fs.existsSync(fpath)) return res.sendFile(fpath);
+  try {
+    const r = await fetch(src);
+    if (!r.ok) throw new Error('upstream ' + r.status);
+    const buf = Buffer.from(await r.arrayBuffer());
+    fs.mkdirSync(LOGO_CACHE_DIR, { recursive: true });
+    fs.writeFileSync(fpath, buf);
+    res.type(ext === 'svg' ? 'image/svg+xml' : ext).send(buf);
+  } catch (e) {
+    res.status(404).json({ error: 'logo not cached and not reachable: ' + e.message });
+  }
+});
+
 // Normalize the credit/unlimited pair coming from the client.
 function resolveCredits({ unlimited, credits }) {
   if (unlimited) return { unlimited: true, credits: UNLIMITED_CREDITS };

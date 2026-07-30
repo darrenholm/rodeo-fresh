@@ -24,6 +24,12 @@ Invoke-Step 'Updating staff portal pages' { git -C "$ROOT\holmdale-staff-portal"
 # Migrations: if this fails, do NOT restart the API onto a half-migrated db.
 Invoke-Step 'Running database migrations' { npm run migrate }
 
+# Pre-warm the sponsor-logo cache while we still have internet. Non-fatal:
+# a partial cache beats blocking the update, and /api/badges/logo also
+# caches on first use whenever internet happens to be up.
+Write-Host "== Caching sponsor logos for offline badge printing ==" -ForegroundColor Cyan
+try { node scripts\onsite\cache-logos.js } catch { Write-Warning "logo cache pre-warm failed: $_" }
+
 Write-Host "== Restarting API ==" -ForegroundColor Cyan
 Restart-Service RodeoAPI
 

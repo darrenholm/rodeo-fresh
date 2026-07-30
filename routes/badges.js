@@ -1,8 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { put } = require('@vercel/blob');
+const fs = require('fs');
+const path = require('path');
 const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+
+// Onsite fallback: when Vercel Blob is unreachable (the event-days Mini PC
+// has no blob token / flaky internet), badge photos land on local disk and
+// are served from GET /api/badges/photos/:file instead.
+const PHOTO_DIR = process.env.BADGE_PHOTO_DIR || path.join(__dirname, '..', 'data', 'badge-photos');
 
 // ============================================================
 //  BADGES — VIP / Volunteer / Sponsor printed NFC name tags
@@ -54,17 +61,36 @@ function parseDataUrl(dataUrl) {
   return { buffer: Buffer.from(m[2], 'base64'), contentType, ext };
 }
 
-async function uploadPhoto(badgeId, dataUrl) {
+async function uploadPhoto(badgeId, dataUrl, req) {
   const parsed = parseDataUrl(dataUrl);
   if (!parsed) throw new Error('photo must be a base64 data URL');
   if (parsed.buffer.length > 4 * 1024 * 1024) throw new Error('photo exceeds 4 MB');
-  const blob = await put(
-    `badges/${badgeId}/${Date.now()}.${parsed.ext}`,
-    parsed.buffer,
-    { access: 'public', contentType: parsed.contentType, addRandomSuffix: false }
-  );
-  return blob.url;
+  try {
+    if (!process.env.BLOB_READ_WRITE_TOKEN) throw new Error('BLOB_READ_WRITE_TOKEN not set');
+    const blob = await put(
+      `badges/${badgeId}/${Date.now()}.${parsed.ext}`,
+      parsed.buffer,
+      { access: 'public', contentType: parsed.contentType, addRandomSuffix: false }
+    );
+    return blob.url;
+  } catch (e) {
+    // Blob unavailable (onsite server / no internet) — store on local disk.
+    fs.mkdirSync(PHOTO_DIR, { recursive: true });
+    const fname = `${badgeId}-${Date.now()}.${parsed.ext}`;
+    fs.writeFileSync(path.join(PHOTO_DIR, fname), parsed.buffer);
+    console.log(`[badges] blob unavailable (${e.message}) — photo stored locally: ${fname}`);
+    return `${req.protocol}://${req.get('host')}/api/badges/photos/${fname}`;
+  }
 }
+
+// ─── GET /api/badges/photos/:file — serve locally-stored badge photos ───
+// (public like the blob URLs were; <img> tags can't send auth headers)
+router.get('/photos/:file', (req, res) => {
+  const fname = path.basename(req.params.file);   // no traversal
+  const fpath = path.join(PHOTO_DIR, fname);
+  if (!fs.existsSync(fpath)) return res.status(404).json({ error: 'not found' });
+  res.sendFile(fpath);
+});
 
 // Normalize the credit/unlimited pair coming from the client.
 function resolveCredits({ unlimited, credits }) {
@@ -337,7 +363,7 @@ router.post('/', authenticateToken, async (req, res) => {
     const id = genId();
 
     let photoUrl = null;
-    if (photo) photoUrl = await uploadPhoto(id, photo);
+    if (photo) photoUrl = await uploadPhoto(id, photo, req);
 
     const result = await pool.query(
       `INSERT INTO wristbands
@@ -382,7 +408,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 
     let photoUrl;
-    if (photo) photoUrl = await uploadPhoto(req.params.id, photo);
+    if (photo) photoUrl = await uploadPhoto(req.params.id, photo, req);
 
     // Only re-resolve credits when the client sent credit/unlimited info.
     const touchCredits = req.body.unlimited !== undefined || req.body.credits !== undefined;

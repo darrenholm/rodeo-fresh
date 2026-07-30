@@ -10,6 +10,9 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+// standalone runs (onsite Mini PC) get creds from .env, same as migrations/run.js —
+// config/database reads DATABASE_URL at require time, so this must come first
+require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 const pool = require('../../config/database');
 
 const LOGO_CACHE_DIR = process.env.LOGO_CACHE_DIR || path.join(__dirname, '..', '..', 'data', 'logo-cache');

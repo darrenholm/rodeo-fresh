@@ -1,11 +1,11 @@
 # Print a PNG full-bleed on a CR80 card printer (Seaory S25).
-# Called by server.js — not meant to be run by hand, but it works standalone:
+# Called by server.js - not meant to be run by hand, but it works standalone:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File print-png.ps1 -Path card.png
 #
 # -Printer '' (default) auto-detects: first installed printer whose name
 # matches seaory/s2<digit>, else the Windows default printer.
 # The image is auto-rotated to match the driver's page orientation and
-# stretched to the full page bounds (no margins — badge art is full-bleed).
+# stretched to the full page bounds (no margins - badge art is full-bleed).
 
 param(
   [Parameter(Mandatory=$true)][string]$Path,
@@ -21,7 +21,7 @@ if (-not (Test-Path -LiteralPath $Path)) { throw "PNG not found: $Path" }
 if (-not $Printer) {
   $installed = @([System.Drawing.Printing.PrinterSettings]::InstalledPrinters)
   $Printer = $installed | Where-Object { $_ -match 'seaory|s2\d' } | Select-Object -First 1
-  # fall through with '' → PrintDocument uses the Windows default printer
+  # fall through with '' -> PrintDocument uses the Windows default printer
 }
 
 $doc = New-Object System.Drawing.Printing.PrintDocument
@@ -59,5 +59,5 @@ try {
   $script:img.Dispose()
 }
 
-# stdout is surfaced by the bridge as the "printed on …" confirmation
+# stdout is surfaced by the bridge as the "printed on ..." confirmation
 Write-Output $doc.PrinterSettings.PrinterName

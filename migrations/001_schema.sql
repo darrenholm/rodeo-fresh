@@ -187,33 +187,33 @@ CREATE TABLE IF NOT EXISTS bar_purchases (
 -- ============================================
 
 -- Staff indexes
-CREATE INDEX idx_staff_email ON staff(email);
-CREATE INDEX idx_staff_fullname ON staff(fullname);
-CREATE INDEX idx_staff_no ON staff(no);
+CREATE INDEX IF NOT EXISTS idx_staff_email ON staff(email);
+CREATE INDEX IF NOT EXISTS idx_staff_fullname ON staff(fullname);
+CREATE INDEX IF NOT EXISTS idx_staff_no ON staff(no);
 
 -- Event indexes
-CREATE INDEX idx_events_date ON events(date);
-CREATE INDEX idx_events_featured ON events(is_featured);
+CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
+CREATE INDEX IF NOT EXISTS idx_events_featured ON events(is_featured);
 
 -- Shift indexes
-CREATE INDEX idx_shifts_date ON shifts(date);
-CREATE INDEX idx_shifts_event ON shifts(event_id);
-CREATE INDEX idx_shifts_staff ON shifts(staff_id);
+CREATE INDEX IF NOT EXISTS idx_shifts_date ON shifts(date);
+CREATE INDEX IF NOT EXISTS idx_shifts_event ON shifts(event_id);
+CREATE INDEX IF NOT EXISTS idx_shifts_staff ON shifts(staff_id);
 
 -- Ticket order indexes
-CREATE INDEX idx_ticket_orders_event ON ticket_orders(event_id);
-CREATE INDEX idx_ticket_orders_email ON ticket_orders(customer_email);
-CREATE INDEX idx_ticket_orders_confirmation ON ticket_orders(confirmation_code);
-CREATE INDEX idx_ticket_orders_status ON ticket_orders(status);
+CREATE INDEX IF NOT EXISTS idx_ticket_orders_event ON ticket_orders(event_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_orders_email ON ticket_orders(customer_email);
+CREATE INDEX IF NOT EXISTS idx_ticket_orders_confirmation ON ticket_orders(confirmation_code);
+CREATE INDEX IF NOT EXISTS idx_ticket_orders_status ON ticket_orders(status);
 
 -- Product indexes
-CREATE INDEX idx_products_category ON products(category);
-CREATE INDEX idx_products_stock ON products(stock);
+CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
+CREATE INDEX IF NOT EXISTS idx_products_stock ON products(stock);
 
 -- Order indexes
-CREATE INDEX idx_orders_email ON orders(customer_email);
-CREATE INDEX idx_orders_status ON orders(status);
-CREATE INDEX idx_orders_stripe_session ON orders(stripe_session_id);
+CREATE INDEX IF NOT EXISTS idx_orders_email ON orders(customer_email);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_stripe_session ON orders(stripe_session_id);
 
 -- ============================================
 -- HELPER FUNCTIONS
@@ -229,23 +229,23 @@ END;
 $$ language 'plpgsql';
 
 -- Triggers for auto-updating updated_at
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+CREATE OR REPLACE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_staff_updated_at BEFORE UPDATE ON staff
+CREATE OR REPLACE TRIGGER update_staff_updated_at BEFORE UPDATE ON staff
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_events_updated_at BEFORE UPDATE ON events
+CREATE OR REPLACE TRIGGER update_events_updated_at BEFORE UPDATE ON events
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_shifts_updated_at BEFORE UPDATE ON shifts
+CREATE OR REPLACE TRIGGER update_shifts_updated_at BEFORE UPDATE ON shifts
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_ticket_orders_updated_at BEFORE UPDATE ON ticket_orders
+CREATE OR REPLACE TRIGGER update_ticket_orders_updated_at BEFORE UPDATE ON ticket_orders
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_products_updated_at BEFORE UPDATE ON products
+CREATE OR REPLACE TRIGGER update_products_updated_at BEFORE UPDATE ON products
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON orders
+CREATE OR REPLACE TRIGGER update_orders_updated_at BEFORE UPDATE ON orders
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

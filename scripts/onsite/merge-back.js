@@ -65,7 +65,16 @@ async function copyTable(table, mode, opts = {}) {
       await client.query('BEGIN');
       for (const row of rows) {
         if (opts.dedupe && await opts.dedupe(client, row)) continue;
-        const vals = useCols.map(c => row[c]);
+        // node-postgres turns JS arrays into Postgres array literals, which a
+        // json/jsonb column rejects ("invalid input syntax for type json").
+        // Stringify arrays/objects so JSON round-trips intact; Dates stay Dates.
+        const vals = useCols.map(c => {
+          const v = row[c];
+          if (v !== null && typeof v === 'object' && !(v instanceof Date) && !Buffer.isBuffer(v)) {
+            return JSON.stringify(v);
+          }
+          return v;
+        });
         const params = useCols.map((_, i) => `$${i + 1}`).join(',');
         const res = await client.query(
           `INSERT INTO "${table}" (${useCols.map(c => `"${c}"`).join(',')}) VALUES (${params}) ${conflict}`,

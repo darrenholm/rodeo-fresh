@@ -220,7 +220,24 @@ module.exports = function(pool) {
         FROM kitchen_orders
         WHERE created_at > NOW() - INTERVAL '8 hours'
       `);
-      res.json(rows[0]);
+      // Reporting totals for the dashboard. The block above is scoped to the
+      // live kitchen-display window (8h, active orders); revenue tiles need
+      // the whole table or food sold last night reads as $0.
+      const { rows: allTime } = await pool.query(`
+        SELECT COUNT(*) AS all_time_orders,
+               COALESCE(SUM(total), 0) AS all_time_revenue
+        FROM kitchen_orders
+        WHERE status != 'cancelled'
+      `);
+      const { rows: byDay } = await pool.query(`
+        SELECT ((created_at AT TIME ZONE 'America/Toronto')::date)::text AS day,
+               COUNT(*) AS orders,
+               COALESCE(SUM(total), 0) AS revenue
+        FROM kitchen_orders
+        WHERE status != 'cancelled'
+        GROUP BY 1 ORDER BY 1
+      `);
+      res.json({ ...rows[0], ...allTime[0], revenue_by_day: byDay });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

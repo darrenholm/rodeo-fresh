@@ -120,7 +120,20 @@ module.exports = function(pool) {
         FROM merch_sales
         WHERE created_at >= CURRENT_DATE
       `);
-      res.json(rows[0]);
+      // All-time + per-day reporting for the dashboard revenue tiles.
+      const { rows: allTime } = await pool.query(`
+        SELECT COUNT(*) AS all_time_sales,
+               COALESCE(SUM(total), 0) AS all_time_revenue
+        FROM merch_sales
+      `);
+      const { rows: byDay } = await pool.query(`
+        SELECT ((created_at AT TIME ZONE 'America/Toronto')::date)::text AS day,
+               COUNT(*) AS sales,
+               COALESCE(SUM(total), 0) AS revenue
+        FROM merch_sales
+        GROUP BY 1 ORDER BY 1
+      `);
+      res.json({ ...rows[0], ...allTime[0], revenue_by_day: byDay });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

@@ -99,6 +99,24 @@ async function copyTable(table, mode, opts = {}) {
   await copyTable('wristbands', 'upsert');
   await copyTable('ticket_orders', 'upsert');
   await copyTable('bar_transactions', 'insert');
+
+  // kitchen_orders: SERIAL ids assigned independently on each side, so let the
+  // cloud assign fresh ids and dedupe by (order_number, total, ~created_at).
+  // The 2s window absorbs JS Date millisecond truncation vs pg microseconds.
+  await copyTable('kitchen_orders', 'insert', {
+    dropId: true,
+    dedupe: async (client, row) => {
+      const r = await client.query(
+        `SELECT 1 FROM kitchen_orders
+         WHERE order_number = $1 AND total = $2
+           AND created_at BETWEEN $3::timestamptz - interval '2 seconds'
+                               AND $3::timestamptz + interval '2 seconds'
+         LIMIT 1`,
+        [row.order_number, row.total, row.created_at]
+      );
+      return r.rows.length > 0;
+    },
+  });
   await copyTable('zone_access_log', 'insert');
   await copyTable('sponsor_guests', 'upsert');
   await copyTable('drinks', 'upsert');

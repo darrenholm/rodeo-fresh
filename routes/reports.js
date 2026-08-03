@@ -141,9 +141,15 @@ router.get('/event-sales', authenticateToken, requireAdmin, async (req, res) => 
     const start = /^\d{4}-\d{2}-\d{2}$/.test(req.query.start || '') ? req.query.start : '2026-07-31';
     const end   = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end   || '') ? req.query.end   : '2026-08-04';
     const n = v => Number(v) || 0;
-    // kitchen_orders/merch_sales are timestamptz; bar_transactions is not, and
-    // is already stored in Eastern — so only the former get converted.
-    const TZ = `AT TIME ZONE 'America/Toronto'`;
+    // Two different storage conventions, both of which must end up as Eastern:
+    //   kitchen_orders / merch_sales  -> timestamptz, so one conversion.
+    //   bar_transactions              -> "timestamp without time zone" holding
+    //                                    UTC (the API server runs Etc/UTC), so
+    //                                    it must be labelled UTC first.
+    // Getting this wrong shifts every bar figure four hours and pushes late-night
+    // trade onto the following day.
+    const TZ = `AT TIME ZONE 'America/Toronto'`;                       // for timestamptz
+    const BTZ = `AT TIME ZONE 'UTC' AT TIME ZONE 'America/Toronto'`;   // for naive-UTC
 
     const [menu, counterRows, barRows, merchRows, flowRows, merchPayRows, hourRows, ktTotal, mtTotal] =
       await Promise.all([
@@ -167,7 +173,7 @@ router.get('/event-sales', authenticateToken, requireAdmin, async (req, res) => 
                  COALESCE(SUM(amount) FILTER (WHERE transaction_type='refund'),0) AS refund_amt
           FROM bar_transactions
           WHERE transaction_type IN ('drink','refund') AND drink_name IS NOT NULL
-            AND created_date::date >= $1 AND created_date::date < $2
+            AND (created_date ${BTZ})::date >= $1 AND (created_date ${BTZ})::date < $2
           GROUP BY 1 ORDER BY 4 DESC`, [start, end]),
         pool.query(`
           SELECT COALESCE(NULLIF(i->>'name',''),'Unknown Item') AS product,
@@ -181,7 +187,7 @@ router.get('/event-sales', authenticateToken, requireAdmin, async (req, res) => 
         pool.query(`
           SELECT transaction_type AS type, COUNT(*)::int AS n, COALESCE(SUM(amount),0) AS amt
           FROM bar_transactions
-          WHERE created_date::date >= $1 AND created_date::date < $2
+          WHERE (created_date ${BTZ})::date >= $1 AND (created_date ${BTZ})::date < $2
           GROUP BY 1 ORDER BY 3 DESC`, [start, end]),
         pool.query(`
           SELECT payment_method AS method, COUNT(*)::int AS sales, COALESCE(SUM(total),0) AS total
@@ -199,7 +205,7 @@ router.get('/event-sales', authenticateToken, requireAdmin, async (req, res) => 
                         AND date_trunc('hour', k.created_at ${TZ}) = h.hr),0) AS counter,
             COALESCE((SELECT SUM(amount) FROM bar_transactions b
                       WHERE b.transaction_type IN ('drink','refund')
-                        AND date_trunc('hour', b.created_date) = h.hr),0) AS bar,
+                        AND date_trunc('hour', b.created_date ${BTZ}) = h.hr),0) AS bar,
             COALESCE((SELECT SUM(subtotal) FROM merch_sales m
                       WHERE date_trunc('hour', m.created_at ${TZ}) = h.hr),0) AS merch
           FROM h ORDER BY 1`, [start, end]),
@@ -265,9 +271,9 @@ router.get('/event-sales', authenticateToken, requireAdmin, async (req, res) => 
     };
     for (const r of counter) touch(r.day)[r.isDrink ? 'drinkTicket' : 'food'] += r.gross;
     for (const r of (await pool.query(`
-          SELECT created_date::date AS d, SUM(amount) AS v FROM bar_transactions
+          SELECT (created_date ${BTZ})::date AS d, SUM(amount) AS v FROM bar_transactions
           WHERE transaction_type IN ('drink','refund')
-            AND created_date::date >= $1 AND created_date::date < $2 GROUP BY 1`, [start, end])).rows)
+            AND (created_date ${BTZ})::date >= $1 AND (created_date ${BTZ})::date < $2 GROUP BY 1`, [start, end])).rows)
       touch(r.d.toISOString().slice(0, 10)).drinkBar += n(r.v);
     for (const r of (await pool.query(`
           SELECT (created_at ${TZ})::date AS d, SUM(subtotal) AS v FROM merch_sales

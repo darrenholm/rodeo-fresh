@@ -11,6 +11,7 @@
 //   zone_access_log  insert-only (badge scans)
 //   sponsor_guests   upsert, local wins (check-in status)
 //   merch_sales      re-insert WITHOUT id (cloud assigns), deduped by order_id
+//   kitchen_orders   upsert, local wins (status/items edited on the booth displays)
 //   drinks/products  upsert, local wins (stock + sold counters)
 //   staff            upsert, local wins (drink allowances used)
 //   events           tickets_sold = GREATEST(cloud, local)
@@ -91,6 +92,7 @@ async function copyTable(table, mode, opts = {}) {
   await copyTable('ticket_orders', 'upsert');
   await copyTable('bar_transactions', 'insert');
   await copyTable('zone_access_log', 'insert');
+  await copyTable('kitchen_orders', 'upsert');
   await copyTable('sponsor_guests', 'upsert');
   await copyTable('drinks', 'upsert');
   await copyTable('products', 'upsert');

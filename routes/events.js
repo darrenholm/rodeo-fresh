@@ -98,15 +98,65 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // DELETE event
+// DELETE an event.
+//
+// ⚠️ ticket_orders, shifts and bar_purchases all reference events(id) with
+// ON DELETE CASCADE. A bare DELETE here does not fail on an event that has
+// sales — it silently destroys every ticket order, staff shift and bar purchase
+// attached to it. For a finished rodeo that is the entire revenue record, the
+// gate check-in history and the reconciliation trail, gone with one click and no
+// warning. Reports covering that year would quietly start reading zero.
+//
+// So: count the dependants first and refuse if there are any. Deleting a past
+// event is almost never what someone actually wants — hiding it from the public
+// site is, and holmdalerodeo.ca already filters events by date, so a finished
+// rodeo drops off the website on its own without touching these records.
+//
+// `?force=true` is the deliberate escape hatch for a genuine mistake (an event
+// created in error that happens to have a test order against it). It has to be
+// typed on purpose; it is not reachable from the admin UI.
 router.delete('/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM events WHERE id = $1 RETURNING id', [req.params.id]);
-    if (result.rows.length === 0) {
+    const exists = await pool.query('SELECT id, title FROM events WHERE id = $1', [req.params.id]);
+    if (exists.rows.length === 0) {
       return res.status(404).json({ error: 'Event not found' });
     }
+
+    if (req.query.force !== 'true') {
+      const deps = await pool.query(
+        `SELECT
+           (SELECT COUNT(*) FROM ticket_orders  WHERE event_id = $1)::int AS orders,
+           (SELECT COUNT(*) FROM shifts         WHERE event_id = $1)::int AS shifts,
+           (SELECT COUNT(*) FROM bar_purchases  WHERE event_id = $1)::int AS bar`,
+        [req.params.id]
+      );
+      const { orders, shifts, bar } = deps.rows[0];
+
+      if (orders > 0 || shifts > 0 || bar > 0) {
+        const parts = [];
+        if (orders) parts.push(`${orders} ticket order${orders === 1 ? '' : 's'}`);
+        if (shifts) parts.push(`${shifts} staff shift${shifts === 1 ? '' : 's'}`);
+        if (bar) parts.push(`${bar} bar purchase${bar === 1 ? '' : 's'}`);
+
+        return res.status(409).json({
+          error:
+            `"${exists.rows[0].title.trim()}" still has ${parts.join(', ')} attached. ` +
+            `Deleting it would permanently destroy those records and the sales reports built on them. ` +
+            `Past events drop off the public website automatically once their date passes, so there is ` +
+            `nothing to clean up here.`,
+          dependents: { ticket_orders: orders, shifts, bar_purchases: bar }
+        });
+      }
+    }
+
+    const result = await pool.query('DELETE FROM events WHERE id = $1 RETURNING id', [req.params.id]);
     res.json({ message: 'Event deleted successfully', id: result.rows[0].id });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete event' });
+    // The old handler swallowed this, so every failure looked identical from the
+    // admin page and there was no way to tell a permissions problem from a
+    // constraint violation.
+    console.error('DELETE /events/:id failed:', error);
+    res.status(500).json({ error: `Failed to delete event: ${error.message}` });
   }
 });
 // POST decrement available tickets

@@ -158,6 +158,10 @@ app.use('/api/sponsor-intake', require('./routes/sponsor-intake'));
 app.use('/api/social', require('./routes/social'));
 app.use('/api/vendor-logos', vendorLogosRoutes);
 
+// Photo library — public gallery + public submissions + staff marketing archive.
+// Stored in Cloudflare R2, not Vercel Blob; see lib/r2.js for why.
+app.use('/api/photos', require('./routes/photos'));
+
 // Wristband Transfer & Balance
 app.use('/api/wristbands', wristbandTransferRoutes);
 app.use('/api/features', featureRoutes);
@@ -499,6 +503,15 @@ app.use((err, req, res, next) => {
     await mig(`CREATE INDEX IF NOT EXISTS idx_signs_sponsor  ON signs(sponsor_id)`);
     await mig(`CREATE INDEX IF NOT EXISTS idx_signs_vendor   ON signs(vendor_id)`);
     await mig(`CREATE INDEX IF NOT EXISTS idx_signs_location ON signs(sign_location_id)`);
+
+    // ── Photo library ──
+    // Marketing photo archive. Full-resolution originals live in a private
+    // Cloudflare R2 bucket; web/thumbnail derivatives live in a public one.
+    // Statements are shared with migrations/add-photo-library.js so the onsite
+    // Mini PC can create the same schema without a deploy.
+    for (const sql of require('./migrations/add-photo-library').STATEMENTS) {
+      await mig(sql);
+    }
 
     console.log('✓ Auto-migrations complete');
   } catch (e) {
